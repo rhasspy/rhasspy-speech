@@ -1,0 +1,4 @@
+- /kaldi/
+- /.venv/
+- /.mypy_cache/
+- /local/

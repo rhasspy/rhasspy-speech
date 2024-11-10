@@ -1,0 +1,70 @@
+language: en
+sentences:
+  - turn (on|off) {light}
+  - turn (on|off) [all] lights in the [the] {area}
+  - turn (on|off) [the] {area} lights
+  - set [the] {area} lights to {color}
+  - set {light} brightness to {brightness} [percent]
+  - set [the] {area} (light[s]|lamp) brightness to {brightness} [percent]
+  - set [a] timer for ({minutes_ones}|{minutes_tens}) minute[s] [and ({seconds_ones}|{seconds_tens}) second[s]]
+  - set [a] timer for ({seconds_ones}|{seconds_tens}) second[s]
+  - (cancel|pause|resume) timer
+  - "({seconds_ones}|{seconds_tens}) second[s] timer"
+  - "({minutes_ones}|{minutes_tens}) minute[s] timer"
+  - whats the weather [like] [today]
+  - what time is it [right now]
+  - whats the time [right now]
+  - whats the date [today]
+  - whats todays date
+  - open [all [of the]] (windows|shutters|doors)
+  - red alert
+  - (never mind|nevermind)
+  - avada kedavra
+  - ascendio
+  - lumioso
+lists:
+  area:
+    values:
+      - office
+      - kitchen
+      - living room
+  light:
+    values:
+      - standing light
+      - overhead light
+      - basement light
+      - under stairs light
+      - utility room light
+      - bed light
+  color:
+    values:
+      - red
+      - green
+      - blue
+      - yellow
+      - orange
+      - pink
+      - white
+  brightness:
+    range:
+      from: 0
+      to: 100
+      step: 10
+  seconds_ones:
+    range:
+      from: 1
+      to: 10
+  seconds_tens:
+    range:
+      from: 15
+      to: 59
+      step: 5
+  minutes_ones:
+    range:
+      from: 1
+      to: 10
+  minutes_tens:
+    range:
+      from: 15
+      to: 59
+      step: 5
