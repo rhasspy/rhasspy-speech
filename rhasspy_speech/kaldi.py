@@ -1,41 +1,22 @@
-import argparse
-import csv
 import asyncio
-import math
 import asyncio.subprocess
+import gzip
 import itertools
 import logging
-import io
-import json
-import base64
 import os
-import subprocess
-import sys
-import re
-import sqlite3
-import shutil
 import shlex
+import shutil
+import sqlite3
+import subprocess
 import tempfile
-import collections
+from collections.abc import AsyncIterable, Collection, Iterable
 from dataclasses import dataclass, field
-from collections.abc import Collection, Iterable, AsyncIterable
-from functools import partial
-from typing import Any, Dict, Optional, List, Set, TextIO, Union
 from pathlib import Path
+from typing import Any, Dict, Optional, Set, TextIO, Union
 
-from hassil.intents import Intents, IntentData, TextSlotList, RangeSlotList, SlotList
-from hassil.sample import sample_expression
-from hassil.expression import (
-    Expression,
-    TextChunk,
-    Sentence,
-    Sequence,
-    SequenceType,
-    ListReference,
-    RuleReference,
-)
 from unicode_rbnf import RbnfEngine
 
+from .g2p import LexiconDatabase, split_words
 from .sentences import generate_sentences
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,11 +30,15 @@ META_END = "__end_"
 META_VALUE = "__value_"
 META_INTENT = "__intent_"
 
+ARPA = "arpa"
+GRAMMAR = "grammar"
+
 
 @dataclass
 class IntentsToFstContext:
     fst_file: TextIO
-    engine: RbnfEngine
+    lexicon: LexiconDatabase
+    number_engine: RbnfEngine
     current_state: Optional[int] = None
     eps: str = EPS
     vocab: Set[str] = field(default_factory=set)
@@ -118,21 +103,15 @@ class TrainingContext:
     train_dir: Path
     kaldi_dir: Path
     model_dir: Path
+    opengrm_dir: Path
     vocab: Collection[str]
+    fst_context: IntentsToFstContext
     eps: str = EPS
     unk: str = UNK
-    # unk_nonterm: str = "#nonterm:unk"
-    # unk_prob: float = 1e-5
     spn_phone: str = "SPN"
     sil_phone: str = "SIL"
-    # unknown_length: int = 0
-    # unk_vocab: Optional[Collection[str]] = None
 
     _extended_env: Optional[Dict[str, Any]] = None
-
-    # @property
-    # def unknown_words_enabled(self):
-    #     return self.unknown_length > 0
 
     @property
     def egs_utils_dir(self):
@@ -154,25 +133,37 @@ class TrainingContext:
     def data_local_dir(self):
         return self.data_dir / "local"
 
-    @property
-    def lang_dir(self):
-        return self.data_dir / "lang"
+    def lang_dir(self, suffix: str):
+        return self.data_dir / f"lang_{suffix}"
 
     @property
-    def graph_dir(self):
-        return self.train_dir / "graph"
+    def dict_local_dir(self):
+        return self.data_local_dir / "dict"
+
+    def lang_local_dir(self, suffix: str):
+        return self.data_local_dir / f"lang_{suffix}"
+
+    def graph_dir(self, suffix: str):
+        return self.train_dir / f"graph_{suffix}"
 
     @property
     def extended_env(self):
         if self._extended_env is None:
             kaldi_bin_dir = self.kaldi_dir / "bin"
             self._extended_env = os.environ.copy()
-            self._extended_env["PATH"] = (
-                str(kaldi_bin_dir)
-                + ":"
-                + str(self.egs_utils_dir)
-                + ":"
-                + self._extended_env["PATH"]
+            self._extended_env["PATH"] = ":".join(
+                (
+                    str(kaldi_bin_dir),
+                    str(self.egs_utils_dir),
+                    str(self.opengrm_dir / "bin"),
+                    self._extended_env.get("PATH", ""),
+                )
+            )
+            self._extended_env["LD_LIBRARY_PATH"] = ":".join(
+                (
+                    str(self.opengrm_dir / "lib"),
+                    self._extended_env.get("LD_LIBRARY_PATH", ""),
+                )
             )
 
         return self._extended_env
@@ -191,17 +182,12 @@ def intents_to_fst(
     train_dir: Union[str, Path],
     sentence_yaml: Dict[str, Any],
     fst_file: TextIO,
-    language: str,
-    lexicon_db_path: Union[str, Path],
-    # frequent_words_path: Optional[Union[str, Path]] = None,
-    # max_unknown_words: int = 50,
-    # min_unknown_length: int = 2,
-    # max_unknown_length: int = 6,
-    # unk_prob: float = 1e-8,
+    lexicon: LexiconDatabase,
+    number_engine: RbnfEngine,
     eps: str = "<eps>",
 ) -> IntentsToFstContext:
     context = IntentsToFstContext(
-        fst_file=fst_file, engine=RbnfEngine.for_language(language), eps=eps
+        fst_file=fst_file, lexicon=lexicon, number_engine=number_engine, eps=eps
     )
     root_state = context.next_state()
     final_state = context.next_state()
@@ -216,126 +202,46 @@ def intents_to_fst(
     # sentence_log_prob = -math.log(sentence_prob)
 
     # for input_text, output_text in sentences:
-    sentences_path = os.path.join(train_dir, "sentences.csv")
+    # sentences_path = os.path.join(train_dir, "sentences.csv")
+    sentences_db_path = os.path.join(train_dir, "sentences.db")
     used_sentences: Set[str] = set()
-    with open(sentences_path, "w", encoding="utf-8") as sentences_file:
-        writer = csv.writer(sentences_file, delimiter="|")
-        for sen_idx, (input_text, output_text) in enumerate(
-            generate_sentences(sentence_yaml, language)
-        ):
-            original_input_text = input_text
+    # with open(sentences_path, "w", encoding="utf-8") as sentences_file:
+    with sqlite3.Connection(sentences_db_path) as sentences_db:
+        # writer = csv.writer(sentences_file, delimiter="|")
+        sentences_db.execute("DROP TABLE IF EXISTS sentences")
+        sentences_db.execute("CREATE TABLE sentences (input TEXT, output TEXT)")
+        sentences_db.execute("CREATE INDEX idx_input ON sentences (input)")
 
-            # TODO: Expose as setting
-            # TODO: Replace numbers, etc.
-            input_text = input_text.lower()
-            input_text = re.sub(r"[_\-\.]", " ", input_text)
-            input_text = re.sub(r"[^a-z ]", "", input_text)
+        for input_text, output_text in generate_sentences(sentence_yaml, number_engine):
+            # original_input_text = input_text
+
+            # TODO: casing as setting
+            input_words = [
+                w.lower()
+                for w in split_words(input_text, lexicon, number_engine)
+                if w.isalpha()
+            ]
+            input_text = " ".join(input_words)
 
             if input_text in used_sentences:
                 continue
 
-            input_words = input_text.split()
-            input_text = " ".join(input_words)
             used_sentences.add(input_text)
 
-            writer.writerow((original_input_text, output_text, input_text))
+            # writer.writerow((original_input_text, output_text, input_text))
+            sentences_db.execute(
+                "INSERT INTO sentences (input, output) VALUES (?, ?)",
+                (input_text, output_text),
+            )
 
-            # state = context.next_edge(root_state, eps, eps, log_prob=sentence_log_prob)
             state = root_state
-            is_output_different = output_text != input_text
-            # is_output_different = False
-
             context.vocab.update(input_words)
 
-            output_text = f"__{sen_idx}"
-            context.meta_labels.add(output_text)
-            for word_idx, word in enumerate(input_words):
-                if word_idx == 0:
-                    state = context.next_edge(state, word, output_text)
-                else:
-                    state = context.next_edge(state, word, eps)
-
-            # for word in input_words:
-            #     state = context.next_edge(
-            #         state, word, word, #eps if is_output_different else word
-            #     )
-
-            # if is_output_different:
-            #     # Emit output text
-            #     output_text = output_text.replace(" ", SPACE)
-            #     output_text = f"__{sen_idx}"
-            #     context.meta_labels.add(output_text)
-            #     state = context.next_edge(state, eps, output_text)
+            for word in input_words:
+                state = context.next_edge(state, word, word)
 
             context.add_edge(state, final_state)
             num_sentences += 1
-
-    # if frequent_words_path:
-    # Add a path in the FST to catch out-of-vocabulary (OOV) sentences.
-    #
-    # This is done by collecting a list of frequently used words in the
-    # language, removing words used in input sentences, and then creating a
-    # sequence of states like:
-    # [start] -> [unknown] -> [unknown] -> ... -> [end]
-    #
-    # Each [unknown] state accepts all of the "unknown" words from the
-    # frequent list. Additionally, each [unknown] state contains an epsilon
-    # transition to [end] so the path can be 1..max_unknown_length in
-    # length.
-    #
-    # Finally, the initial [start] transition is given a low probability
-    # (unk_prob) to ensure it's only taken if nothing else fits.
-    #
-    # A balance must be struck between:
-    # * unk_prob - probability of entering the OOV/unknown path
-    # * max_unknown_words - number of frequent words used at each path step
-    # * max_unknown_length - number of steps in the path
-    #
-    # Increasing max_unknown_words and max_unknown_length will catch more
-    # OOV sentences, but slow down decoding.
-    #
-    # Increasing unk_prob will catch more OOV sentences, but increase the
-    # number of false negatives (valid sentences detected as OOV).
-    # unknown_words: Set[str] = set()
-    # unk_prob = max(0.0, min(1.0 - sys.float_info.epsilon, unk_prob))
-    # unk_log_prob = -math.log(unk_prob)
-
-    # # Expecting a text file with a list of frequently used words in the
-    # # language, most frequent first.
-    # with open(
-    #     frequent_words_path, "r", encoding="utf-8"
-    # ) as freq_file, sqlite3.connect(str(lexicon_db_path)) as lexicon_db:
-    #     for word in freq_file:
-    #         word = word.strip()
-    #         if word and (word not in context.vocab):
-    #             cursor = lexicon_db.execute(
-    #                 "SELECT COUNT(*) from word_phonemes WHERE word = ?",
-    #                 (word,),
-    #             )
-    #             count = next(iter(cursor), [0])[0]
-    #             if count < 1:
-    #                 # Not in lexicon
-    #                 continue
-
-    #             unknown_words.add(word)
-    #             context.vocab.add(word)
-    #             if len(unknown_words) >= max_unknown_words:
-    #                 break
-
-    # _LOGGER.debug("Adding OOV path using %s word(s)", len(unknown_words))
-
-    # # [start] -> [unknown] -> [unknown] -> ... -> [end]
-    # state = context.next_edge(root_state, log_prob=unk_log_prob)
-    # for i in range(max_unknown_length):
-    #     unknown_start = context.next_edge(state)
-    #     unknown_end = context.next_state()
-    #     for word in unknown_words:
-    #         context.add_edge(unknown_start, unknown_end, word, UNK)
-
-    #     if i >= min_unknown_length:
-    #         context.add_edge(unknown_end, final_state)
-
-    #     state = unknown_end
 
     context.accept(final_state)
     context.fst_file.seek(0)
@@ -353,13 +259,13 @@ class KaldiTrainer:
         self,
         kaldi_dir: Union[str, Path],
         model_dir: Union[str, Path],
-        lexicon_db_path: Union[str, Path],
         phonetisaurus_bin: Union[str, Path],
+        opengrm_dir: Union[str, Path],
     ):
         self.kaldi_dir = Path(kaldi_dir).absolute()
         self.model_dir = Path(model_dir).absolute()
-        self.lexicon_db = sqlite3.connect(lexicon_db_path)
         self.phonetisaurus_bin = Path(phonetisaurus_bin)
+        self.opengrm_dir = Path(opengrm_dir).absolute()
 
     def train(
         self,
@@ -367,31 +273,21 @@ class KaldiTrainer:
         train_dir: Union[str, Path],
         eps: str = EPS,
         unk: str = UNK,
-        unk_nonterm: str = "#nonterm:unk",
         spn_phone: str = "SPN",
         sil_phone: str = "SIL",
-        # unknown_length: int = 0,
-        # max_unknown_words: int = 100,
-        # possible_unknown_words: Optional[Collection[str]] = None,
     ):
         ctx = TrainingContext(
             train_dir=Path(train_dir).absolute(),
             kaldi_dir=self.kaldi_dir,
             model_dir=self.model_dir,
+            opengrm_dir=self.opengrm_dir,
             vocab=fst_context.vocab,
+            fst_context=fst_context,
             eps=eps,
             unk=unk,
             spn_phone=spn_phone,
             sil_phone=sil_phone,
-            # unknown_length=unknown_length,
         )
-
-        # if ctx.unknown_words_enabled:
-        #     # Exclude vocab
-        #     ctx.unk_vocab = [w for w in possible_unknown_words if w not in vocab][
-        #         :max_unknown_words
-        #     ]
-        #     assert ctx.unk_vocab, "No unknown words remain"
 
         # ---------------------------------------------------------------------
 
@@ -408,10 +304,13 @@ class KaldiTrainer:
         if ctx.data_dir.exists():
             shutil.rmtree(ctx.data_dir)
 
-        ctx.lang_dir.mkdir(parents=True, exist_ok=True)
-
-        if ctx.graph_dir.exists():
-            shutil.rmtree(ctx.graph_dir)
+        # We will train two models:
+        # * arpa - uses a 3-gram language model
+        # * grammar - uses a fixed grammar
+        for lang_type in (ARPA, GRAMMAR):
+            ctx.lang_dir(lang_type).mkdir(parents=True, exist_ok=True)
+            if ctx.graph_dir(lang_type).exists():
+                shutil.rmtree(ctx.graph_dir(lang_type))
 
         # ---------------------------------------------------------------------
         # Kaldi Training
@@ -445,7 +344,8 @@ class KaldiTrainer:
         self._prepare_lang(ctx)
 
         # 2. Generate G.fst from skill graph
-        self._create_fst(ctx, fst_context.fst_file)
+        self._create_grammar(ctx, fst_context.fst_file)
+        self._create_arpa(ctx, fst_context.fst_file)
 
         # 3. mkgraph.sh
         self._mkgraph(ctx)
@@ -467,17 +367,13 @@ class KaldiTrainer:
 
         # Create dictionary
         dictionary_path = dict_local_dir / "lexicon.txt"
+        lexicon = ctx.fst_context.lexicon
         with open(dictionary_path, "w", encoding="utf-8") as dictionary_file:
             missing_words = set()
             for word in sorted(ctx.vocab):
-                cursor = self.lexicon_db.execute(
-                    "SELECT phonemes from word_phonemes WHERE word = ? ORDER BY pron_order",
-                    (word,),
-                )
-
                 word_found = False
-                for row in cursor:
-                    phonemes_str = row[0]
+                for word_pron in lexicon.lookup(word):
+                    phonemes_str = " ".join(word_pron)
                     print(word, phonemes_str, file=dictionary_file)
                     word_found = True
 
@@ -533,32 +429,107 @@ class KaldiTrainer:
                 print(label, ctx.sil_phone, file=dictionary_file)
 
     def _prepare_lang(self, ctx: TrainingContext):
-        dict_local_dir = ctx.data_local_dir / "dict"
-        lang_local_dir = ctx.data_local_dir / "lang"
-        prepare_lang = [
-            "bash",
-            str(ctx.egs_utils_dir / "prepare_lang.sh"),
-            str(dict_local_dir),
-            ctx.unk,
-            str(lang_local_dir),
-            str(ctx.lang_dir),
+        for lang_type in (ARPA, GRAMMAR):
+            prepare_lang = [
+                "bash",
+                str(ctx.egs_utils_dir / "prepare_lang.sh"),
+                str(ctx.dict_local_dir),
+                ctx.unk,
+                str(ctx.lang_local_dir(lang_type)),
+                str(ctx.lang_dir(lang_type)),
+            ]
+
+            _LOGGER.debug(prepare_lang)
+            subprocess.check_call(prepare_lang, cwd=ctx.train_dir, env=ctx.extended_env)
+
+    def _create_arpa(self, ctx: TrainingContext, fst_file: TextIO):
+        lang_dir = ctx.lang_dir(ARPA)
+        fst_path = lang_dir / "G.arpa.fst"
+        text_fst_path = fst_path.with_suffix(".fst.txt")
+
+        with open(text_fst_path, "w", encoding="utf-8") as text_fst_file:
+            fst_file.seek(0)
+            shutil.copyfileobj(fst_file, text_fst_file)
+
+        compile_fst = [
+            "fstcompile",
+            shlex.quote(f"--isymbols={lang_dir}/words.txt"),
+            shlex.quote(f"--osymbols={lang_dir}/words.txt"),
+            "--keep_isymbols=true",
+            "--keep_osymbols=true",
+            shlex.quote(str(text_fst_path)),
+            shlex.quote(str(fst_path)),
         ]
 
-        _LOGGER.debug(prepare_lang)
-        subprocess.check_call(prepare_lang, cwd=ctx.train_dir, env=ctx.extended_env)
+        _LOGGER.debug(compile_fst)
+        ctx.run(compile_fst)
 
-    def _create_fst(self, ctx: TrainingContext, fst_file: TextIO):
-        fst_path = ctx.lang_dir / "G.fst"
+        counts_path = lang_dir / "G.ngram_counts.fst"
+        ngram_counts = [
+            "ngramcount",
+            shlex.quote(str(fst_path)),
+            shlex.quote(str(counts_path)),
+        ]
+
+        _LOGGER.debug(ngram_counts)
+        ctx.run(ngram_counts)
+
+        lm_fst_path = lang_dir / "G.lm.fst"
+        ngram_make = [
+            "ngrammake",
+            # "--method=kneser_ney",
+            "--method=witten_bell",
+            shlex.quote(str(counts_path)),
+            shlex.quote(str(lm_fst_path)),
+        ]
+
+        _LOGGER.debug(ngram_make)
+        ctx.run(ngram_make)
+
+        arpa_path = lang_dir / "lm.arpa"
+        ngram_print = [
+            "ngramprint",
+            "--ARPA",
+            shlex.quote(str(lm_fst_path)),
+            shlex.quote(str(arpa_path)),
+        ]
+
+        _LOGGER.debug(ngram_print)
+        ctx.run(ngram_print)
+
+        lang_local_dir = ctx.lang_local_dir(ARPA)
+        arpa_gz_path = lang_local_dir / "lm.arpa.gz"
+        with open(arpa_path, "r", encoding="utf-8") as arpa_file, gzip.open(
+            arpa_gz_path, "wt", encoding="utf-8"
+        ) as arpa_gz_file:
+            shutil.copyfileobj(arpa_file, arpa_gz_file)
+
+        format_lm = [
+            "bash",
+            str(ctx.egs_utils_dir / "format_lm.sh"),
+            str(lang_dir),
+            str(arpa_gz_path),
+            str(ctx.dict_local_dir / "lexicon.txt"),
+            str(lang_dir),
+        ]
+
+        _LOGGER.debug(format_lm)
+        ctx.run(format_lm)
+
+    def _create_grammar(self, ctx: TrainingContext, fst_file: TextIO):
+        lang_dir = ctx.lang_dir(GRAMMAR)
+        fst_path = lang_dir / "G.fst"
         unsorted_fst_path = fst_path.with_suffix(".fst.unsorted")
         text_fst_path = fst_path.with_suffix(".fst.txt")
 
         with open(text_fst_path, "w", encoding="utf-8") as text_fst_file:
+            fst_file.seek(0)
             shutil.copyfileobj(fst_file, text_fst_file)
 
         compile_grammar = [
             "fstcompile",
-            shlex.quote(f"--isymbols={ctx.lang_dir}/words.txt"),
-            shlex.quote(f"--osymbols={ctx.lang_dir}/words.txt"),
+            shlex.quote(f"--isymbols={lang_dir}/words.txt"),
+            shlex.quote(f"--osymbols={lang_dir}/words.txt"),
             "--keep_isymbols=false",
             "--keep_osymbols=false",
             "--keep_state_numbering=true",
@@ -602,47 +573,49 @@ class KaldiTrainer:
         unsorted_fst_path.unlink()
 
     def _mkgraph(self, ctx: TrainingContext):
-        mkgraph = [
-            "bash",
-            str(ctx.egs_utils_dir / "mkgraph.sh"),
-            "--self-loop-scale",
-            "1.0",
-            str(ctx.lang_dir),
-            str(ctx.model_dir / "model"),
-            str(ctx.graph_dir),
-        ]
-        _LOGGER.debug(mkgraph)
-        ctx.run(mkgraph)
+        for lang_type in (ARPA, GRAMMAR):
+            mkgraph = [
+                "bash",
+                str(ctx.egs_utils_dir / "mkgraph.sh"),
+                "--self-loop-scale",
+                "1.0",
+                str(ctx.lang_dir(lang_type)),
+                str(ctx.model_dir / "model"),
+                str(ctx.graph_dir(lang_type)),
+            ]
+            _LOGGER.debug(mkgraph)
+            ctx.run(mkgraph)
 
     def _prepare_online_decoding(self, ctx: TrainingContext):
-        extractor_dir = ctx.model_dir / "extractor"
-        if extractor_dir.is_dir():
-            # Generate online.conf
-            mfcc_conf = ctx.model_dir / "conf" / "mfcc_hires.conf"
-            prepare_online_decoding = [
-                "bash",
-                str(
-                    ctx.egs_steps_dir
-                    / "online"
-                    / "nnet3"
-                    / "prepare_online_decoding.sh"
-                ),
-                "--mfcc-config",
-                str(mfcc_conf),
-                str(ctx.lang_dir),
-                str(extractor_dir),
-                str(ctx.model_dir / "model"),
-                str(ctx.model_dir / "online"),
-            ]
+        for lang_type in (ARPA, GRAMMAR):
+            extractor_dir = ctx.model_dir / "extractor"
+            if extractor_dir.is_dir():
+                # Generate online.conf
+                mfcc_conf = ctx.model_dir / "conf" / "mfcc_hires.conf"
+                prepare_online_decoding = [
+                    "bash",
+                    str(
+                        ctx.egs_steps_dir
+                        / "online"
+                        / "nnet3"
+                        / "prepare_online_decoding.sh"
+                    ),
+                    "--mfcc-config",
+                    str(mfcc_conf),
+                    str(ctx.lang_dir(lang_type)),
+                    str(extractor_dir),
+                    str(ctx.model_dir / "model"),
+                    str(ctx.model_dir / "online"),
+                ]
 
-            _LOGGER.debug(prepare_online_decoding)
-            subprocess.run(
-                prepare_online_decoding,
-                cwd=ctx.train_dir,
-                env=ctx.extended_env,
-                stderr=subprocess.STDOUT,
-                check=True,
-            )
+                _LOGGER.debug(prepare_online_decoding)
+                subprocess.run(
+                    prepare_online_decoding,
+                    cwd=ctx.train_dir,
+                    env=ctx.extended_env,
+                    stderr=subprocess.STDOUT,
+                    check=True,
+                )
 
 
 # -----------------------------------------------------------------------------
@@ -655,6 +628,7 @@ class KaldiTranscriber:
         self,
         model_dir: Union[str, Path],
         graph_dir: Union[str, Path],
+        sentences_db_path: Union[str, Path],
         kaldi_bin_dir: Union[str, Path],
         max_active: int = 7000,
         lattice_beam: float = 8.0,
@@ -662,11 +636,12 @@ class KaldiTranscriber:
         beam: float = 24.0,
     ):
         self.model_dir = Path(model_dir)
+        self.sentences_db_conn = sqlite3.Connection(sentences_db_path)
         self.graph_dir = Path(graph_dir)
         self.kaldi_bin_dir = Path(kaldi_bin_dir)
 
         self.decode_proc: Optional[subprocess.Popen] = None
-        self.decode_proc_async: Optional[asyncio.subprocess.Process] = None
+        self.decode_proc_async: "Optional[asyncio.subprocess.Process]" = None
 
         # Additional arguments passed to Kaldi process
         self.kaldi_args = [
@@ -687,12 +662,8 @@ class KaldiTranscriber:
         text = self._transcribe_wav_nnet3(str(wav_path))
 
         if text:
-            if UNK in text:
-                # Unknown words path
-                text = ""
-
             # Success
-            return _fix_text(text).strip()
+            return self._fix_text(text).strip()
 
         # Failure
         return None
@@ -737,19 +708,15 @@ class KaldiTranscriber:
                     text = parts[1]
                 break
 
-        return _fix_text(text)
+        return text
 
     async def transcribe_wav_async(self, wav_path: Union[str, Path]) -> Optional[str]:
         """Speech to text from WAV data."""
         text = await self._transcribe_wav_nnet3_async(str(wav_path))
 
         if text:
-            if UNK in text:
-                # Unknown words path
-                text = ""
-
             # Success
-            return _fix_text(text).strip()
+            return self._fix_text(text).strip()
 
         # Failure
         return None
@@ -799,7 +766,7 @@ class KaldiTranscriber:
                     text = parts[1]
                 break
 
-        return _fix_text(text)
+        return text
 
     # -------------------------------------------------------------------------
 
@@ -815,6 +782,9 @@ class KaldiTranscriber:
             self.start()
 
         assert self.decode_proc, "No decode process"
+        assert self.decode_proc.stdin is not None
+        assert self.decode_proc.stdout is not None
+        assert self.chunk_fifo_file is not None
 
         # start_time = time.perf_counter()
         num_frames = 0
@@ -866,13 +836,9 @@ class KaldiTranscriber:
             for word, _word_confidence, _word_start_time, _word_end_time in grouper(
                 words, n=4
             ):
-                if word == UNK:
-                    # Unknown words path
-                    return ""
-
                 tokens.append(word)
 
-            return _fix_text(" ".join(t for t in tokens))
+            return self._fix_text(" ".join(t for t in tokens))
 
         # Failure
         return None
@@ -889,6 +855,9 @@ class KaldiTranscriber:
             await self.start_async()
 
         assert self.decode_proc_async, "No decode process"
+        assert self.decode_proc_async.stdin is not None
+        assert self.decode_proc_async.stdout is not None
+        assert self.chunk_fifo_file is not None
 
         # start_time = time.perf_counter()
         num_frames = 0
@@ -945,13 +914,9 @@ class KaldiTranscriber:
             for word, _word_confidence, _word_start_time, _word_end_time in grouper(
                 words, n=4
             ):
-                if word == UNK:
-                    # Unknown words path
-                    return ""
-
                 tokens.append(word)
 
-            return _fix_text(" ".join(t for t in tokens))
+            return self._fix_text(" ".join(t for t in tokens))
 
         # Failure
         return None
@@ -1097,13 +1062,18 @@ class KaldiTranscriber:
 
         _LOGGER.debug("Decoder started")
 
+    def _fix_text(self, text: str) -> str:
+        cur = self.sentences_db_conn.execute(
+            "SELECT output FROM sentences WHERE input = ? LIMIT 1", (text,)
+        )
+        for row in cur:
+            return row[0]
+
+        return text
+
 
 def grouper(iterable, n, fillvalue=None):
     "Collect data into fixed-length chunks or blocks"
     # grouper('ABCDEFG', 3, 'x') --> ABC DEF Gxx"
     args = [iter(iterable)] * n
     return itertools.zip_longest(*args, fillvalue=fillvalue)
-
-
-def _fix_text(text: str) -> str:
-    return text.replace(SPACE, " ")

@@ -1,33 +1,33 @@
 import collections.abc
 import itertools
-import time
 import logging
-from collections.abc import Iterable, Sequence as ABCSequence
-from typing import Dict, Any, List, Optional, Tuple
+import time
+from collections.abc import Iterable
+from collections.abc import Sequence as ABCSequence
 from functools import partial
+from typing import Any, Dict, List, Optional, Tuple
 
 import hassil.parse_expression
 import hassil.sample
-from hassil.recognize import MissingListError, MissingRuleError
-from hassil.util import normalize_whitespace
-from hassil.intents import SlotList, TextSlotList, TextSlotValue
 from hassil.expression import (
+    Expression,
     ListReference,
     RuleReference,
+    Sentence,
     Sequence,
     SequenceType,
     TextChunk,
-    Sentence,
-    Expression,
 )
+from hassil.intents import SlotList, TextSlotList, TextSlotValue
+from hassil.recognize import MissingListError, MissingRuleError
+from hassil.util import normalize_whitespace
 from unicode_rbnf import RbnfEngine
-
 
 _LOGGER = logging.getLogger()
 
 
 def generate_sentences(
-    sentences_yaml: Dict[str, Any], number_language: str
+    sentences_yaml: Dict[str, Any], number_engine: RbnfEngine
 ) -> Iterable[Tuple[str, str]]:
     start_time = time.monotonic()
 
@@ -47,9 +47,6 @@ def generate_sentences(
     #   <name>: sentence template
     templates = sentences_yaml["sentences"]
 
-    # numbers to words
-    engine = RbnfEngine.for_language(number_language)
-
     # Load slot lists
     slot_lists: Dict[str, SlotList] = {}
     for slot_name, slot_info in sentences_yaml.get("lists", {}).items():
@@ -65,7 +62,7 @@ def generate_sentences(
             slot_step = int(slot_range.get("step", 1))
             for i in range(slot_from, slot_to + 1, slot_step):
                 # Use all available words for a number (all genders, cases, etc.)
-                format_result = engine.format_number(i)
+                format_result = number_engine.format_number(i)
                 number_strs = {
                     s.replace("-", " ") for s in format_result.text_by_ruleset.values()
                 }
@@ -260,7 +257,9 @@ def sample_expression_with_output(
                     for v in text_list.values
                     if (
                         (not requires_context)
-                        or check_required_context(requires_context, v.context)
+                        or check_required_context(
+                            requires_context, v.context, allow_missing_keys=True
+                        )
                     )
                     and (
                         (not excludes_context)

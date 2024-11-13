@@ -20,6 +20,8 @@ def main() -> None:
 def export_lexicon_db(output_dir: Path) -> None:
     """Export base dictionary to sqlite3 database."""
 
+    # TODO: Create indexes
+
 # -----------------------------------------------------------------------------
 
 if __name__ == "__main__":

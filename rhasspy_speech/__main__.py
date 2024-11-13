@@ -4,8 +4,8 @@ import logging
 import os
 import sys
 
-from .train import train_model
 from .kaldi import KaldiTranscriber
+from .train import train_model
 
 
 def main() -> None:
@@ -24,7 +24,7 @@ def main() -> None:
         help="Path to YAML sentence file",
     )
     train_parser.add_argument("--phonetisaurus-bin", required=True)
-    # train_parser.add_argument("--frequent-words-file")
+    train_parser.add_argument("--opengrm-dir", required=True)
 
     transcribe_parser = subparsers.add_parser("transcribe")
     transcribe_parser.add_argument("--kaldi-dir", required=True)
@@ -44,12 +44,13 @@ def main() -> None:
             model_dir=args.model_dir,
             train_dir=args.train_dir,
             phonetisaurus_bin=args.phonetisaurus_bin,
-            # frequent_words_path=args.frequent_words_file,
+            opengrm_dir=args.opengrm_dir,
         )
     elif args.command == "transcribe":
         transcriber = KaldiTranscriber(
             model_dir=os.path.join(args.model_dir, "model"),
             graph_dir=os.path.join(args.train_dir, "graph"),
+            sentences_db_path=os.path.join(args.train_dir, "sentences.db"),
             kaldi_bin_dir=os.path.join(args.kaldi_dir, "bin"),
         )
         writer = csv.writer(sys.stdout, delimiter="|")

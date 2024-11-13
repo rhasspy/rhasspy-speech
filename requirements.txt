@@ -1,1 +1,3 @@
 hassil==1.8.0
+unicode-rbnf>=2,<3
+regex==2024.11.6
