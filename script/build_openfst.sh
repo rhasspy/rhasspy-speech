@@ -8,7 +8,8 @@ local_dir="${program_dir}/local/openfst"
 mkdir -p "${local_dir}"
 
 pushd "${src_dir}"
-export LDFLAGS="-Wl,-rpath,'$ORIGIN/../lib'"
+export CFLAGS='-O2'
+export CXXFLAGS='-O2'
 ./configure --prefix="${local_dir}" --enable-grm
 make -j8
 make install

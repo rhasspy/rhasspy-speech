@@ -14,7 +14,8 @@ fi
 mkdir -p "${local_dir}"
 
 pushd "${src_dir}"
-export CPPFLAGS="-I${openfst_local_dir}/include"
+export CFLAGS='-O2'
+export CXXFLAGS="-O2 -I${openfst_local_dir}/include"
 export LDFLAGS="-L${openfst_local_dir}/lib"
 ./configure --prefix="${local_dir}"
 make -j8
