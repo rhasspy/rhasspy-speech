@@ -1,4 +1,5 @@
 """Methods to train a custom Kaldi model."""
+
 import io
 import os
 from collections.abc import Iterable
@@ -11,6 +12,7 @@ from yaml import safe_load
 
 from .g2p import LexiconDatabase, get_sounds_like
 from .kaldi import KaldiTrainer, intents_to_fst
+from .shared import TrainingEvent, TrainingEventHandler
 
 
 def train_model(
@@ -20,6 +22,7 @@ def train_model(
     model_dir: Union[str, Path],
     train_dir: Union[str, Path],
     phonetisaurus_bin: Union[str, Path],
+    openfst_dir: Union[str, Path],
     opengrm_dir: Union[str, Path],
 ):
     """Train a model on YAML sentences."""
@@ -50,9 +53,10 @@ def train_model(
             number_engine=number_engine,
         )
         trainer = KaldiTrainer(
-            kaldi_dir,
-            os.path.join(model_dir, "model"),
-            phonetisaurus_bin,
-            opengrm_dir,
+            kaldi_dir=kaldi_dir,
+            model_dir=os.path.join(model_dir, "model"),
+            phonetisaurus_bin=phonetisaurus_bin,
+            opengrm_dir=opengrm_dir,
+            openfst_dir=openfst_dir,
         )
         trainer.train(fst_context, train_dir)

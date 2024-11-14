@@ -25,6 +25,7 @@ def main() -> None:
     )
     train_parser.add_argument("--phonetisaurus-bin", required=True)
     train_parser.add_argument("--opengrm-dir", required=True)
+    train_parser.add_argument("--openfst-dir", required=True)
 
     transcribe_parser = subparsers.add_parser("transcribe")
     transcribe_parser.add_argument("--kaldi-dir", required=True)
@@ -45,6 +46,7 @@ def main() -> None:
             train_dir=args.train_dir,
             phonetisaurus_bin=args.phonetisaurus_bin,
             opengrm_dir=args.opengrm_dir,
+            openfst_dir=args.openfst_dir,
         )
     elif args.command == "transcribe":
         transcriber = KaldiTranscriber(

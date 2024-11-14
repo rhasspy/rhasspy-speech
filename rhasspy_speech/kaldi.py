@@ -104,6 +104,7 @@ class TrainingContext:
     kaldi_dir: Path
     model_dir: Path
     opengrm_dir: Path
+    openfst_dir: Path
     vocab: Collection[str]
     fst_context: IntentsToFstContext
     eps: str = EPS
@@ -149,19 +150,21 @@ class TrainingContext:
     @property
     def extended_env(self):
         if self._extended_env is None:
-            kaldi_bin_dir = self.kaldi_dir / "bin"
             self._extended_env = os.environ.copy()
             self._extended_env["PATH"] = ":".join(
                 (
-                    str(kaldi_bin_dir),
+                    str(self.kaldi_dir / "bin"),
                     str(self.egs_utils_dir),
                     str(self.opengrm_dir / "bin"),
+                    str(self.openfst_dir / "bin"),
                     self._extended_env.get("PATH", ""),
                 )
             )
             self._extended_env["LD_LIBRARY_PATH"] = ":".join(
                 (
+                    str(self.kaldi_dir / "lib"),
                     str(self.opengrm_dir / "lib"),
+                    str(self.openfst_dir / "lib"),
                     self._extended_env.get("LD_LIBRARY_PATH", ""),
                 )
             )
@@ -261,11 +264,13 @@ class KaldiTrainer:
         model_dir: Union[str, Path],
         phonetisaurus_bin: Union[str, Path],
         opengrm_dir: Union[str, Path],
+        openfst_dir: Union[str, Path],
     ):
         self.kaldi_dir = Path(kaldi_dir).absolute()
         self.model_dir = Path(model_dir).absolute()
         self.phonetisaurus_bin = Path(phonetisaurus_bin)
         self.opengrm_dir = Path(opengrm_dir).absolute()
+        self.openfst_dir = Path(openfst_dir).absolute()
 
     def train(
         self,
@@ -281,6 +286,7 @@ class KaldiTrainer:
             kaldi_dir=self.kaldi_dir,
             model_dir=self.model_dir,
             opengrm_dir=self.opengrm_dir,
+            openfst_dir=self.openfst_dir,
             vocab=fst_context.vocab,
             fst_context=fst_context,
             eps=eps,
@@ -628,7 +634,6 @@ class KaldiTranscriber:
         self,
         model_dir: Union[str, Path],
         graph_dir: Union[str, Path],
-        sentences_db_path: Union[str, Path],
         kaldi_bin_dir: Union[str, Path],
         max_active: int = 7000,
         lattice_beam: float = 8.0,
@@ -636,7 +641,6 @@ class KaldiTranscriber:
         beam: float = 24.0,
     ):
         self.model_dir = Path(model_dir)
-        self.sentences_db_conn = sqlite3.Connection(sentences_db_path)
         self.graph_dir = Path(graph_dir)
         self.kaldi_bin_dir = Path(kaldi_bin_dir)
 
@@ -1063,12 +1067,6 @@ class KaldiTranscriber:
         _LOGGER.debug("Decoder started")
 
     def _fix_text(self, text: str) -> str:
-        cur = self.sentences_db_conn.execute(
-            "SELECT output FROM sentences WHERE input = ? LIMIT 1", (text,)
-        )
-        for row in cur:
-            return row[0]
-
         return text
 
 
