@@ -1,0 +1,102 @@
+0	0	order=0,bin=0	order=0,bin=0	-7.01750612
+0	0	order=0,bin=1	order=0,bin=1	-6.04025459
+0	0	order=0,bin=2	order=0,bin=2	-5.11198759
+0	0	order=0,bin=3	order=0,bin=3	-4.60517025
+0	0	order=0,bin=4	order=0,bin=4	-4.29045963
+0	0	order=0,bin=5	order=0,bin=5	-4.02535152
+0	0	order=0,bin=6	order=0,bin=6	-3.71357203
+0	0	order=0,bin=7	order=0,bin=7	-3.46573591
+0	0	order=0,bin=8	order=0,bin=8	-3.25809646
+0	0	order=0,bin=9	order=0,bin=9	-3.13549423
+0	0	order=0,bin=10	order=0,bin=10	-2.56494927
+0	0	order=0,bin=11	order=0,bin=11	-2.77258873
+0	0	order=0,bin=12	order=0,bin=12	-2.6390574
+0	0	order=0,bin=13	order=0,bin=13	-2.39789534
+0	0	order=0,bin=14	order=0,bin=14	-2.48490667
+0	0	order=0,bin=15	order=0,bin=15	-2.39789534
+0	0	order=0,bin=16	order=0,bin=16	-2.30258512
+0	0	order=0,bin=17	order=0,bin=17	-2.70805025
+0	0	order=0,bin=18	order=0,bin=18	-1.38629436
+0	0	order=0,bin=19	order=0,bin=19	-1.60943794
+0	0	order=0,bin=20	order=0,bin=20	-1.9459101
+0	0	order=0,bin=21	order=0,bin=21	-1.09861231
+0	0	order=0,bin=22	order=0,bin=22	-1.60943794
+0	0	order=0,bin=23	order=0,bin=23	-0.693147182
+0	0	order=0,bin=24	order=0,bin=24	-1.38629436
+0	0	order=0,bin=25	order=0,bin=25	-1.38629436
+0	0	order=0,bin=26	order=0,bin=26	-1.38629436
+0	0	order=0,bin=27	order=0,bin=27	-1.38629436
+0	0	order=0,bin=28	order=0,bin=28	-1.38629436
+0	0	order=0,bin=29	order=0,bin=29	-2.07944155
+0	0	order=0,bin=30	order=0,bin=30	-0.693147182
+0	0	order=0,bin=31	order=0,bin=31	-1.09861231
+0	0	order=0,bin=32	order=0,bin=32
+0	0	order=1,bin=0	order=1,bin=0	-8.95853996
+0	0	order=1,bin=1	order=1,bin=1	-7.18311167
+0	0	order=1,bin=2	order=1,bin=2	-6.06145716
+0	0	order=1,bin=3	order=1,bin=3	-5.36597586
+0	0	order=1,bin=4	order=1,bin=4	-4.89784002
+0	0	order=1,bin=5	order=1,bin=5	-4.5217886
+0	0	order=1,bin=6	order=1,bin=6	-4.30406523
+0	0	order=1,bin=7	order=1,bin=7	-3.68887949
+0	0	order=1,bin=8	order=1,bin=8	-3.66356158
+0	0	order=1,bin=9	order=1,bin=9	-3.29583693
+0	0	order=1,bin=10	order=1,bin=10	-3.09104252
+0	0	order=1,bin=11	order=1,bin=11	-3.04452252
+0	0	order=1,bin=12	order=1,bin=12	-2.6390574
+0	0	order=1,bin=13	order=1,bin=13	-2.70805025
+0	0	order=1,bin=14	order=1,bin=14	-2.56494927
+0	0	order=1,bin=15	order=1,bin=15	-2.19722462
+0	0	order=1,bin=16	order=1,bin=16	-2.07944155
+0	0	order=1,bin=17	order=1,bin=17	-1.38629436
+0	0	order=1,bin=18	order=1,bin=18	-1.79175949
+0	0	order=1,bin=19	order=1,bin=19	-1.9459101
+0	0	order=1,bin=20	order=1,bin=20	-1.9459101
+0	0	order=1,bin=21	order=1,bin=21	-1.79175949
+0	0	order=1,bin=22	order=1,bin=22	-1.09861231
+0	0	order=1,bin=23	order=1,bin=23	-0.693147182
+0	0	order=1,bin=24	order=1,bin=24	-1.60943794
+0	0	order=1,bin=25	order=1,bin=25	-1.09861231
+0	0	order=1,bin=26	order=1,bin=26	-0.693147182
+0	0	order=1,bin=30	order=1,bin=30
+0	0	order=1,bin=31	order=1,bin=31
+0	0	order=1,bin=32	order=1,bin=32
+0	0	order=2,bin=0	order=2,bin=0	-9.4919796
+0	0	order=2,bin=1	order=2,bin=1	-6.93049479
+0	0	order=2,bin=2	order=2,bin=2	-5.50533152
+0	0	order=2,bin=3	order=2,bin=3	-4.60517025
+0	0	order=2,bin=4	order=2,bin=4	-4.00733328
+0	0	order=2,bin=5	order=2,bin=5	-3.29583693
+0	0	order=2,bin=6	order=2,bin=6	-3.33220458
+0	0	order=2,bin=7	order=2,bin=7	-2.70805025
+0	0	order=2,bin=8	order=2,bin=8	-2.56494927
+0	0	order=2,bin=9	order=2,bin=9	-1.9459101
+0	0	order=2,bin=10	order=2,bin=10	-1.79175949
+0	0	order=2,bin=11	order=2,bin=11	-1.60943794
+0	0	order=2,bin=12	order=2,bin=12	-1.60943794
+0	0	order=2,bin=13	order=2,bin=13	-1.09861231
+0	0	order=2,bin=14	order=2,bin=14
+0	0	order=2,bin=15	order=2,bin=15
+0	0	order=2,bin=19	order=2,bin=19	-0.693147182
+0	0	order=2,bin=22	order=2,bin=22
+0	0	order=2,bin=23	order=2,bin=23
+0	0	order=2,bin=29	order=2,bin=29
+0	0	order=3,bin=0	order=3,bin=0	-9.58355808
+0	0	order=3,bin=1	order=3,bin=1	-6.3044486
+0	0	order=3,bin=2	order=3,bin=2	-4.43081665
+0	0	order=3,bin=3	order=3,bin=3	-3.46573591
+0	0	order=3,bin=4	order=3,bin=4	-2.56494927
+0	0	order=3,bin=5	order=3,bin=5	-2.19722462
+0	0	order=3,bin=6	order=3,bin=6	-1.09861231
+0	0	order=3,bin=7	order=3,bin=7	-1.09861231
+0	0	order=3,bin=8	order=3,bin=8
+0	0	order=3,bin=13	order=3,bin=13
+0	0	order=3,bin=23	order=3,bin=23
+0	0	order=4,bin=0	order=4,bin=0	-9.53892422
+0	0	order=4,bin=1	order=4,bin=1	-5.45532131
+0	0	order=4,bin=2	order=4,bin=2	-3.40119743
+0	0	order=4,bin=3	order=4,bin=3	-2.48490667
+0	0	order=4,bin=4	order=4,bin=4	-0.693147182
+0	0	order=4,bin=6	order=4,bin=6
+0	0	order=4,bin=8	order=4,bin=8
+0	-10.9452829

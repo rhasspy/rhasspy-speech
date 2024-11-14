@@ -1,0 +1,14 @@
+# of states                                       39076
+# of ngram arcs                                   51618
+# of backoff arcs                                 39075
+initial state                                     1
+unigram state                                     0
+# of final states                                 5190
+ngram order                                       5
+# of 1-grams                                      2305
+# of 2-grams                                      10319
+# of 3-grams                                      14796
+# of 4-grams                                      15218
+# of 5-grams                                      14170
+well-formed                                       y
+normalized                                        y
