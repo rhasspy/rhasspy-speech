@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import itertools
 import sqlite3
+import subprocess
+import tempfile
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import regex as re
 from unicode_rbnf import RbnfEngine
@@ -275,3 +277,42 @@ def get_aligned_phonemes(
 
         if can_match and phonemes:
             yield phonemes
+
+
+# -----------------------------------------------------------------------------
+
+
+def guess_pronunciations(
+    words: Iterable[str],
+    g2p_model_path: Union[str, Path],
+    phonetisaurus_bin: Union[str, Path],
+) -> Iterable[Tuple[str, str]]:
+    with tempfile.NamedTemporaryFile(
+        "w+", encoding="utf-8", suffix=".txt"
+    ) as wordlist_file:
+        for word in words:
+            print(word, file=wordlist_file)
+
+        wordlist_file.seek(0)
+
+        phonetisaurus_output = (
+            subprocess.check_output(
+                [
+                    str(phonetisaurus_bin),
+                    f"--model={g2p_model_path}",
+                    f"--wordlist={wordlist_file.name}",
+                ]
+            )
+            .decode()
+            .splitlines()
+        )
+        for line in phonetisaurus_output:
+            line = line.strip()
+            if line:
+                line_parts = line.split()
+                if len(line_parts) < 3:
+                    continue
+
+                word = line_parts[0]
+                phonemes = " ".join(line_parts[2:])
+                yield (word, phonemes)

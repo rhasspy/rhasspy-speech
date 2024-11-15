@@ -52,7 +52,6 @@ def main() -> None:
         transcriber = KaldiTranscriber(
             model_dir=os.path.join(args.model_dir, "model"),
             graph_dir=os.path.join(args.train_dir, "graph"),
-            sentences_db_path=os.path.join(args.train_dir, "sentences.db"),
             kaldi_bin_dir=os.path.join(args.kaldi_dir, "bin"),
         )
         writer = csv.writer(sys.stdout, delimiter="|")
