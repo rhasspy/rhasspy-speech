@@ -12,7 +12,6 @@ from yaml import safe_load
 
 from .g2p import LexiconDatabase, get_sounds_like
 from .kaldi import KaldiTrainer, intents_to_fst
-from .shared import TrainingEvent, TrainingEventHandler
 
 
 def train_model(
