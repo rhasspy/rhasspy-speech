@@ -4,7 +4,7 @@ import io
 import os
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, Union
+from typing import Any, Dict, Optional, Union
 
 from hassil.util import merge_dict
 from unicode_rbnf import RbnfEngine
@@ -21,8 +21,8 @@ def train_model(
     model_dir: Union[str, Path],
     train_dir: Union[str, Path],
     phonetisaurus_bin: Union[str, Path],
-    openfst_dir: Union[str, Path],
-    opengrm_dir: Union[str, Path],
+    openfst_dir: Optional[Union[str, Path]] = None,
+    opengrm_dir: Optional[Union[str, Path]] = None,
 ):
     """Train a model on YAML sentences."""
     sentence_yaml: Dict[str, Any] = {}

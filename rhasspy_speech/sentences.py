@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import hassil.parse_expression
 import hassil.sample
+from hassil.errors import MissingListError, MissingRuleError
 from hassil.expression import (
     Expression,
     ListReference,
@@ -19,7 +20,6 @@ from hassil.expression import (
     TextChunk,
 )
 from hassil.intents import SlotList, TextSlotList, TextSlotValue
-from hassil.recognize import MissingListError, MissingRuleError
 from hassil.util import normalize_whitespace
 from unicode_rbnf import RbnfEngine
 
@@ -27,7 +27,7 @@ _LOGGER = logging.getLogger()
 
 
 def generate_sentences(
-    sentences_yaml: Dict[str, Any], number_engine: RbnfEngine
+    sentences_yaml: Dict[str, Any], number_engine: Optional[RbnfEngine] = None
 ) -> Iterable[Tuple[str, str]]:
     start_time = time.monotonic()
 
@@ -57,6 +57,9 @@ def generate_sentences(
 
         slot_range = slot_info.get("range")
         if slot_range:
+            assert (
+                number_engine is not None
+            ), "Can't expand ranges without a number engine"
             slot_from = int(slot_range["from"])
             slot_to = int(slot_range["to"])
             slot_step = int(slot_range.get("step", 1))
@@ -96,7 +99,11 @@ def generate_sentences(
             else:
                 # - in: text to say
                 #   out: text to output
-                value_in = slot_value["in"]
+                value_in = str(slot_value["in"])
+                if not value_in:
+                    # Skip slot value
+                    continue
+
                 value_out = slot_value.get("out", value_in)
                 value_context = slot_value.get("context")
 

@@ -32,12 +32,12 @@ def transcriber() -> KaldiTranscriber:
         train_dir=train_dir,
         phonetisaurus_bin=_LOCAL_DIR / "phonetisaurus",
         opengrm_dir=_LOCAL_DIR / "opengrm",
+        openfst_dir=_LOCAL_DIR / "openfst",
     )
 
     return KaldiTranscriber(
         model_dir=model_dir / "model",
         graph_dir=train_dir / "graph_grammar",
-        sentences_db_path=train_dir / "sentences.db",
         kaldi_bin_dir=_LOCAL_DIR / "kaldi" / "bin",
     )
 

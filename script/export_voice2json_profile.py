@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import sqlite3
 import gzip
 import shutil
 from collections import Counter
 from pathlib import Path
 from typing import Dict, TextIO, Set
+
+import yaml
+
+
+def env_constructor(loader, node):
+    return node.value
 
 
 def main() -> None:
@@ -58,6 +65,33 @@ def main() -> None:
 
         # cp src/model/dir dst/model/dir
         shutil.copytree(model_sub_dir, output_model_sub_dir)
+
+    # config
+    print("Creating config.json")
+    yaml.SafeLoader.add_constructor("!env", env_constructor)
+    with open(profile_dir / "profile.yml", "r", encoding="utf-8") as profile_file, open(
+        output_dir / "config.json", "w", encoding="utf-8"
+    ) as config_file:
+        profile_dict = yaml.safe_load(profile_file)
+        config_dict = {
+            "name": profile_dict["name"],
+            "version": profile_dict["version"],
+            "language": profile_dict["language"],
+            "lexicon": {"casing": profile_dict["training"]["word-casing"]},
+            "g2p": {"casing": profile_dict["training"]["g2p-word-casing"]},
+        }
+        json.dump(config_dict, config_file, indent=4)
+
+    # extras
+    for file_name in (
+        "frequent_words.txt",
+        "phoneme_examples.txt",
+        "README.md",
+        "LICENSE",
+        "SOURCE",
+    ):
+        if (profile_dir / file_name).exists():
+            shutil.copy(profile_dir / file_name, output_dir / file_name)
 
     print("Done")
 

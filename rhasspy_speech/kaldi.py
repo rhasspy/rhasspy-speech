@@ -12,7 +12,7 @@ import tempfile
 from collections.abc import AsyncIterable, Collection, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Set, TextIO, Union
+from typing import Any, Dict, List, Optional, Set, TextIO, Union
 
 from unicode_rbnf import RbnfEngine
 
@@ -103,10 +103,10 @@ class TrainingContext:
     train_dir: Path
     kaldi_dir: Path
     model_dir: Path
-    opengrm_dir: Path
-    openfst_dir: Path
     vocab: Collection[str]
     fst_context: IntentsToFstContext
+    opengrm_dir: Optional[Path] = None
+    openfst_dir: Optional[Path] = None
     eps: str = EPS
     unk: str = UNK
     spn_phone: str = "SPN"
@@ -148,26 +148,30 @@ class TrainingContext:
         return self.train_dir / f"graph_{suffix}"
 
     @property
-    def extended_env(self):
+    def extended_env(self) -> Dict[str, str]:
         if self._extended_env is None:
             self._extended_env = os.environ.copy()
-            self._extended_env["PATH"] = ":".join(
-                (
-                    str(self.kaldi_dir / "bin"),
-                    str(self.egs_utils_dir),
-                    str(self.opengrm_dir / "bin"),
-                    str(self.openfst_dir / "bin"),
-                    self._extended_env.get("PATH", ""),
-                )
-            )
-            self._extended_env["LD_LIBRARY_PATH"] = ":".join(
-                (
-                    str(self.kaldi_dir / "lib"),
-                    str(self.opengrm_dir / "lib"),
-                    str(self.openfst_dir / "lib"),
-                    self._extended_env.get("LD_LIBRARY_PATH", ""),
-                )
-            )
+            bin_dirs: List[str] = [str(self.kaldi_dir / "bin"), str(self.egs_utils_dir)]
+            lib_dirs: List[str] = [str(self.kaldi_dir / "lib")]
+
+            if self.opengrm_dir:
+                bin_dirs.append(str(self.opengrm_dir / "bin"))
+                lib_dirs.append(str(self.opengrm_dir / "lib"))
+
+            if self.openfst_dir:
+                bin_dirs.append(str(self.openfst_dir / "bin"))
+                lib_dirs.append(str(self.openfst_dir / "lib"))
+
+            current_path = self._extended_env.get("PATH")
+            if current_path:
+                bin_dirs.append(current_path)
+
+            current_lib_path = self._extended_env.get("LD_LIBRARY_PATH")
+            if current_lib_path:
+                lib_dirs.append(current_lib_path)
+
+            self._extended_env["PATH"] = ":".join(bin_dirs)
+            self._extended_env["LD_LIBRARY_PATH"] = ":".join(lib_dirs)
 
         return self._extended_env
 
@@ -263,14 +267,20 @@ class KaldiTrainer:
         kaldi_dir: Union[str, Path],
         model_dir: Union[str, Path],
         phonetisaurus_bin: Union[str, Path],
-        opengrm_dir: Union[str, Path],
-        openfst_dir: Union[str, Path],
+        opengrm_dir: Optional[Union[str, Path]] = None,
+        openfst_dir: Optional[Union[str, Path]] = None,
     ):
         self.kaldi_dir = Path(kaldi_dir).absolute()
         self.model_dir = Path(model_dir).absolute()
         self.phonetisaurus_bin = Path(phonetisaurus_bin)
-        self.opengrm_dir = Path(opengrm_dir).absolute()
-        self.openfst_dir = Path(openfst_dir).absolute()
+
+        self.opengrm_dir: Optional[Path] = None
+        if opengrm_dir:
+            self.opengrm_dir = Path(opengrm_dir).absolute()
+
+        self.openfst_dir: Optional[Path] = None
+        if openfst_dir:
+            self.openfst_dir = Path(openfst_dir).absolute()
 
     def train(
         self,
