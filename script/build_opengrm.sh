@@ -18,6 +18,9 @@ export CFLAGS='-O2'
 export CXXFLAGS="-O2 -I${openfst_local_dir}/include"
 export LDFLAGS="-L${openfst_local_dir}/lib"
 ./configure --prefix="${local_dir}"
-make -j8
+make -j$(nproc)
 make install
+
+find "${local_dir}/opengrm/bin" -type f -executable \
+    -exec patchelf --set-rpath '$ORIGIN/../lib' {}
 popd

@@ -11,6 +11,9 @@ pushd "${src_dir}"
 export CFLAGS='-O2'
 export CXXFLAGS='-O2'
 ./configure --prefix="${local_dir}" --enable-grm
-make -j8
+make -j$(nproc)
 make install
+
+find "${local_dir}/openfst/bin" -type f -executable \
+    -exec patchelf --set-rpath '$ORIGIN/../lib' {}
 popd

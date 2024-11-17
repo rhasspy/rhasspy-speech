@@ -3,11 +3,18 @@ this_dir="$( cd "$( dirname "$0" )" && pwd )"
 program_dir="$(realpath "${this_dir}/..")"
 
 kaldi_source_dir="${program_dir}/kaldi"
+kaldi_openfst_dir="${kaldi_source_dir}/openfst"
 kaldi_build_dir="${program_dir}/build/kaldi"
 local_dir="${program_dir}/local"
-kaldi_install_dir="$(realpath ${local_dir}/kaldi)"
 
+mkdir -p "${local_dir}"
+kaldi_install_dir="$(realpath ${local_dir}/kaldi)"
 mkdir -p "${kaldi_build_dir}" "${kaldi_install_dir}"
+
+if [ -d "${kaldi_openfst_dir}" ]; then
+    # Avoid download
+    cp -R "${kaldi_openfst_dir}" "${kaldi_build_dir}/"
+fi
 
 pushd "${kaldi_build_dir}"
 cmake \
@@ -22,7 +29,10 @@ cmake \
 cmake \
     --build . \
     --target install \
-    -- -j8
+    -- -j$(nproc)
+
+find "${local_dir}/kaldi/bin" -type f -executable \
+    -exec patchelf --set-rpath '$ORIGIN/../lib' {}
 popd
 
 # Copy wsj example

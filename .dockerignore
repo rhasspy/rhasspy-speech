@@ -1,0 +1,6 @@
+*
+!kaldi/
+!openfst/
+!opengrm/
+!phonetisaurus
+!script/
