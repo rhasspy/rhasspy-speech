@@ -79,6 +79,7 @@ def main() -> None:
             "language": profile_dict["language"],
             "lexicon": {"casing": profile_dict["training"]["word-casing"]},
             "g2p": {"casing": profile_dict["training"]["g2p-word-casing"]},
+            "spn_phone": profile_dict["training"].get("spn_phone", "SPN"),
         }
         json.dump(config_dict, config_file, indent=4)
 

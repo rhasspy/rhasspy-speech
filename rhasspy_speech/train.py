@@ -1,5 +1,6 @@
 """Methods to train a custom Kaldi model."""
 
+import json
 import io
 import os
 from collections.abc import Iterable
@@ -11,7 +12,7 @@ from unicode_rbnf import RbnfEngine
 from yaml import safe_load
 
 from .g2p import LexiconDatabase, get_sounds_like
-from .kaldi import KaldiTrainer, intents_to_fst
+from .kaldi import KaldiTrainer, intents_to_fst, WordCasing
 
 
 def train_model(
@@ -25,6 +26,13 @@ def train_model(
     opengrm_dir: Optional[Union[str, Path]] = None,
 ):
     """Train a model on YAML sentences."""
+    model_config: Dict[str, Any] = {}
+    model_config_path = os.path.join(model_dir, "config.json")
+    if os.path.exists(model_config_path):
+        with open(model_config_path, "r", encoding="utf-8") as model_config_file:
+            model_config = json.load(model_config_file)
+
+    word_casing = WordCasing(model_config.get("word_casing", "lower"))
     sentence_yaml: Dict[str, Any] = {}
 
     for sentence_path in sentence_files:
@@ -50,6 +58,7 @@ def train_model(
             fst_file=fst_file,
             lexicon=lexicon,
             number_engine=number_engine,
+            word_casing=word_casing,
         )
         trainer = KaldiTrainer(
             kaldi_dir=kaldi_dir,
@@ -58,4 +67,9 @@ def train_model(
             opengrm_dir=opengrm_dir,
             openfst_dir=openfst_dir,
         )
-        trainer.train(fst_context, train_dir)
+
+        train_kwargs = {}
+        if "spn_phone" in model_config:
+            train_kwargs["spn_phone"] = model_config["spn_phone"]
+
+        trainer.train(fst_context, train_dir, **train_kwargs)

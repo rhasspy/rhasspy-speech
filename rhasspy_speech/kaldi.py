@@ -9,8 +9,9 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
-from collections.abc import AsyncIterable, Collection, Iterable
+from collections.abc import AsyncIterable, Collection, Iterable, Callable
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, TextIO, Union
 
@@ -34,6 +35,27 @@ ARPA = "arpa"
 GRAMMAR = "grammar"
 
 
+class ModelType(str, Enum):
+    NNET3 = "nnet3"
+    GMM = "gmm"
+
+
+class WordCasing(str, Enum):
+    KEEP = "keep"
+    LOWER = "lower"
+    UPPER = "upper"
+
+    @staticmethod
+    def get_function(casing: "WordCasing") -> Callable[[str], str]:
+        if casing == WordCasing.LOWER:
+            return str.lower
+
+        if casing == WordCasing.UPPER:
+            return str.upper
+
+        return lambda s: s
+
+
 @dataclass
 class IntentsToFstContext:
     fst_file: TextIO
@@ -43,6 +65,7 @@ class IntentsToFstContext:
     eps: str = EPS
     vocab: Set[str] = field(default_factory=set)
     meta_labels: Set[str] = field(default_factory=set)
+    word_casing: WordCasing = WordCasing.LOWER
 
     def next_state(self) -> int:
         if self.current_state is None:
@@ -191,6 +214,7 @@ def intents_to_fst(
     fst_file: TextIO,
     lexicon: LexiconDatabase,
     number_engine: RbnfEngine,
+    word_casing: WordCasing = WordCasing.LOWER,
     eps: str = "<eps>",
 ) -> IntentsToFstContext:
     context = IntentsToFstContext(
@@ -200,33 +224,17 @@ def intents_to_fst(
     final_state = context.next_state()
 
     num_sentences = 0
-    # sentences = list(generate_sentences(sentence_yaml, language))
-    # if frequent_words_path:
-    #     sentence_prob = (1.0 - unk_prob) / len(sentences)
-    # else:
-    #     sentence_prob = 1.0 / len(sentences)
-
-    # sentence_log_prob = -math.log(sentence_prob)
-
-    # for input_text, output_text in sentences:
-    # sentences_path = os.path.join(train_dir, "sentences.csv")
     sentences_db_path = os.path.join(train_dir, "sentences.db")
     used_sentences: Set[str] = set()
-    # with open(sentences_path, "w", encoding="utf-8") as sentences_file:
+    casing_func = WordCasing.get_function(word_casing)
     with sqlite3.Connection(sentences_db_path) as sentences_db:
-        # writer = csv.writer(sentences_file, delimiter="|")
         sentences_db.execute("DROP TABLE IF EXISTS sentences")
         sentences_db.execute("CREATE TABLE sentences (input TEXT, output TEXT)")
         sentences_db.execute("CREATE INDEX idx_input ON sentences (input)")
 
         for input_text, output_text in generate_sentences(sentence_yaml, number_engine):
-            # original_input_text = input_text
-
-            # TODO: casing as setting
             input_words = [
-                w.lower()
-                for w in split_words(input_text, lexicon, number_engine)
-                if w.isalpha()
+                casing_func(w) for w in split_words(input_text, lexicon, number_engine)
             ]
             input_text = " ".join(input_words)
 
@@ -235,7 +243,6 @@ def intents_to_fst(
 
             used_sentences.add(input_text)
 
-            # writer.writerow((original_input_text, output_text, input_text))
             sentences_db.execute(
                 "INSERT INTO sentences (input, output) VALUES (?, ?)",
                 (input_text, output_text),
@@ -649,7 +656,9 @@ class KaldiTranscriber:
         lattice_beam: float = 8.0,
         acoustic_scale: float = 1.0,
         beam: float = 24.0,
+        model_type: ModelType = ModelType.NNET3,
     ):
+        self.model_type = model_type
         self.model_dir = Path(model_dir)
         self.graph_dir = Path(graph_dir)
         self.kaldi_bin_dir = Path(kaldi_bin_dir)
@@ -673,7 +682,12 @@ class KaldiTranscriber:
 
     def transcribe_wav(self, wav_path: Union[str, Path]) -> Optional[str]:
         """Speech to text from WAV data."""
-        text = self._transcribe_wav_nnet3(str(wav_path))
+        if self.model_type == ModelType.NNET3:
+            text = self._transcribe_wav_nnet3(str(wav_path))
+        elif self.model_type == ModelType.GMM:
+            text = self._transcribe_wav_gmm(str(wav_path))
+        else:
+            raise ValueError(f"Unknown model type: {model_type}")
 
         if text:
             # Success
@@ -723,6 +737,88 @@ class KaldiTranscriber:
                 break
 
         return text
+
+    def _transcribe_wav_gmm(self, wav_path: str) -> str:
+        # GMM decoding steps:
+        # 1. compute-mfcc-feats
+        # 2. compute-cmvn-stats
+        # 3. apply-cmvn
+        # 4. add-deltas
+        # 5. gmm-latgen-faster
+        with tempfile.TemporaryDirectory() as temp_dir:
+            words_txt = self.graph_dir / "words.txt"
+            mfcc_conf = self.model_dir / "conf" / "mfcc.conf"
+
+            # 1. compute-mfcc-feats
+            feats_cmd = [
+                str(self.kaldi_dir / "compute-mfcc-feats"),
+                f"--config={mfcc_conf}",
+                f"scp:echo utt1 {wav_path}|",
+                f"ark,scp:{temp_dir}/feats.ark,{temp_dir}/feats.scp",
+            ]
+            _LOGGER.debug(feats_cmd)
+            subprocess.check_call(feats_cmd)
+
+            # 2. compute-cmvn-stats
+            stats_cmd = [
+                str(self.kaldi_dir / "compute-cmvn-stats"),
+                f"scp:{temp_dir}/feats.scp",
+                f"ark,scp:{temp_dir}/cmvn.ark,{temp_dir}/cmvn.scp",
+            ]
+            _LOGGER.debug(stats_cmd)
+            subprocess.check_call(stats_cmd)
+
+            # 3. apply-cmvn
+            norm_cmd = [
+                str(self.kaldi_dir / "apply-cmvn"),
+                f"scp:{temp_dir}/cmvn.scp",
+                f"scp:{temp_dir}/feats.scp",
+                f"ark,scp:{temp_dir}/feats_cmvn.ark,{temp_dir}/feats_cmvn.scp",
+            ]
+            _LOGGER.debug(norm_cmd)
+            subprocess.check_call(norm_cmd)
+
+            # 4. add-deltas
+            delta_cmd = [
+                str(self.kaldi_dir / "add-deltas"),
+                f"scp:{temp_dir}/feats_cmvn.scp",
+                f"ark,scp:{temp_dir}/deltas.ark,{temp_dir}/deltas.scp",
+            ]
+            _LOGGER.debug(delta_cmd)
+            subprocess.check_call(delta_cmd)
+
+            # 5. decode
+            decode_cmd = [
+                str(self.kaldi_dir / "gmm-latgen-faster"),
+                f"--word-symbol-table={words_txt}",
+                f"{self.model_dir}/model/final.mdl",
+                f"{self.graph_dir}/HCLG.fst",
+                f"scp:{temp_dir}/deltas.scp",
+                f"ark,scp:{temp_dir}/lattices.ark,{temp_dir}/lattices.scp",
+            ]
+            _LOGGER.debug(decode_cmd)
+            subprocess.check_call(decode_cmd)
+
+            try:
+                lines = (
+                    subprocess.check_output(decode_cmd, stderr=subprocess.STDOUT)
+                    .decode()
+                    .splitlines()
+                )
+            except subprocess.CalledProcessError as e:
+                _LOGGER.exception("_transcribe_wav_gmm")
+                _LOGGER.error(e.output)
+                lines = []
+
+            text = ""
+            for line in lines:
+                if line.startswith("utt1 "):
+                    parts = line.split(maxsplit=1)
+                    if len(parts) > 1:
+                        text = parts[1]
+                    break
+
+            return text
 
     async def transcribe_wav_async(self, wav_path: Union[str, Path]) -> Optional[str]:
         """Speech to text from WAV data."""
