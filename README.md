@@ -18,7 +18,7 @@ will allow `rhasspy-speech` to recognize the sentences:
 
 ## Supported Languages
 
-[Pre-built models](https://huggingface.co/datasets/rhasspy/rhasspy-speech/tree/main) and derived from the corresponding [voice2json models](https://github.com/synesthesiam/voice2json-profiles).
+[Pre-built models](https://huggingface.co/datasets/rhasspy/rhasspy-speech/tree/main/models) and derived from the corresponding [voice2json models](https://github.com/synesthesiam/voice2json-profiles).
 
 * Czech, Czech Republic
 * German, Germany
@@ -28,6 +28,15 @@ will allow `rhasspy-speech` to recognize the sentences:
 * Italian, Italy
 * Dutch, Netherlands
 * Russian, Russia
+
+## Tools
+
+[Pre-built tools](https://huggingface.co/datasets/rhasspy/rhasspy-speech/tree/main/tools) must be downloaded for `rhasspy-speech` to work. This includes:
+
+* [Kaldi](https://kaldi-asr.org/)
+* [openfst](https://www.openfst.org)
+* [opengrm](https://www.opengrm.org)
+* [phonetisaurus](https://github.com/AdolfVonKleist/Phonetisaurus)
 
 ## Handling Out of Vocabulary
 
