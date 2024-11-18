@@ -29,7 +29,7 @@ will allow `rhasspy-speech` to recognize the sentences:
 * Dutch, Netherlands
 * Russian, Russia
 
-## Tools
+## Tools and Dependencies
 
 [Pre-built tools](https://huggingface.co/datasets/rhasspy/rhasspy-speech/tree/main/tools) must be downloaded for `rhasspy-speech` to work. This includes:
 
@@ -37,6 +37,13 @@ will allow `rhasspy-speech` to recognize the sentences:
 * [openfst](https://www.openfst.org)
 * [opengrm](https://www.opengrm.org)
 * [phonetisaurus](https://github.com/AdolfVonKleist/Phonetisaurus)
+
+See the `build_*` scripts in `script/` for how these tools are built. See the `Dockerfile` and `script/build_docker.sh` for how they are packaged.
+
+You must also have the following system packages installed at runtime:
+
+* `libopenblas0`
+* `libencode-perl`
 
 ## Handling Out of Vocabulary
 
