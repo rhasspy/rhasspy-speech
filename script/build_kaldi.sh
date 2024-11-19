@@ -30,9 +30,6 @@ cmake \
     --build . \
     --target install \
     -- -j$(nproc)
-
-find "${local_dir}/kaldi/bin" -type f -executable \
-    -exec patchelf --set-rpath '$ORIGIN/../lib' {}
 popd
 
 # Copy wsj example

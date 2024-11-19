@@ -10,10 +10,10 @@ mkdir -p "${local_dir}"
 pushd "${src_dir}"
 export CFLAGS='-O2'
 export CXXFLAGS='-O2'
-./configure --prefix="${local_dir}" --enable-grm
+./configure --prefix="${local_dir}" --enable-grm --enable-far --enable-bin
 make -j$(nproc)
 make install
 
-find "${local_dir}/openfst/bin" -type f -executable \
-    -exec patchelf --set-rpath '$ORIGIN/../lib' {}
+# Necessary on ARM for some reason
+make -C src/extensions/far -j$(nproc) install
 popd

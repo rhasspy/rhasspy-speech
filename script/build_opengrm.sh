@@ -21,6 +21,7 @@ export LDFLAGS="-L${openfst_local_dir}/lib"
 make -j$(nproc)
 make install
 
-find "${local_dir}/opengrm/bin" -type f -executable \
-    -exec patchelf --set-rpath '$ORIGIN/../lib' {}
+
+# Necessary on ARM for some reason
+make -C src/bin -j$(nproc) install
 popd
