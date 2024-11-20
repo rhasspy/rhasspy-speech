@@ -370,10 +370,10 @@ class KaldiTrainer:
         self._create_arpa(ctx, fst_context.fst_file)
 
         # 3. mkgraph.sh
-        self._mkgraph(ctx)
+        self._mkgraph(ctx, ARPA)
 
         # 4. prepare_online_decoding.sh
-        self._prepare_online_decoding(ctx)
+        self._prepare_online_decoding(ctx, ARPA)
 
     # -------------------------------------------------------------------------
 
@@ -601,8 +601,8 @@ class KaldiTrainer:
         ctx.run(arcsort)
         unsorted_fst_path.unlink()
 
-    def _mkgraph(self, ctx: TrainingContext):
-        for lang_type in (ARPA, GRAMMAR):
+    def _mkgraph(self, ctx: TrainingContext, *lang_types: str):
+        for lang_type in lang_types:
             mkgraph = [
                 "bash",
                 str(ctx.egs_utils_dir / "mkgraph.sh"),
@@ -615,8 +615,8 @@ class KaldiTrainer:
             _LOGGER.debug(mkgraph)
             ctx.run(mkgraph)
 
-    def _prepare_online_decoding(self, ctx: TrainingContext):
-        for lang_type in (ARPA, GRAMMAR):
+    def _prepare_online_decoding(self, ctx: TrainingContext, *lang_types: str):
+        for lang_type in lang_types:
             extractor_dir = ctx.model_dir / "extractor"
             if extractor_dir.is_dir():
                 # Generate online.conf
