@@ -364,16 +364,17 @@ class KaldiTrainer:
         model_utils_link.symlink_to(ctx.egs_utils_dir, target_is_directory=True)
 
         # 1. prepare_lang.sh
-        self._prepare_lang(ctx, ARPA)
+        self._prepare_lang(ctx, ARPA, GRAMMAR)
 
         # 2. Generate G.fst from skill graph
+        self._create_grammar(ctx, fst_context.fst_file)
         self._create_arpa(ctx, fst_context.fst_file)
 
         # 3. mkgraph.sh
-        self._mkgraph(ctx, ARPA)
+        self._mkgraph(ctx, ARPA, GRAMMAR)
 
         # 4. prepare_online_decoding.sh
-        self._prepare_online_decoding(ctx, ARPA)
+        self._prepare_online_decoding(ctx, ARPA, GRAMMAR)
 
     # -------------------------------------------------------------------------
 
