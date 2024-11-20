@@ -367,7 +367,6 @@ class KaldiTrainer:
         self._prepare_lang(ctx, ARPA)
 
         # 2. Generate G.fst from skill graph
-        self._create_grammar(ctx, fst_context.fst_file)
         self._create_arpa(ctx, fst_context.fst_file)
 
         # 3. mkgraph.sh
