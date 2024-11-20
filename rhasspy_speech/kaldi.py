@@ -854,7 +854,7 @@ class KaldiTranscriber:
                 str(self.graph_dir / "HCLG.fst"),
                 "ark:echo utt1 utt1|",
                 f"scp:echo utt1 {wav_path}|",
-                "ark:/tmp/test/lattices.ark",
+                "ark:/dev/null",
             ]
         )
 
