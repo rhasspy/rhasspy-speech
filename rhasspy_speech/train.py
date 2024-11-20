@@ -1,7 +1,7 @@
 """Methods to train a custom Kaldi model."""
 
-import json
 import io
+import json
 import os
 from collections.abc import Iterable
 from pathlib import Path
@@ -12,7 +12,7 @@ from unicode_rbnf import RbnfEngine
 from yaml import safe_load
 
 from .g2p import LexiconDatabase, get_sounds_like
-from .kaldi import KaldiTrainer, intents_to_fst, WordCasing
+from .kaldi import KaldiTrainer, WordCasing, intents_to_fst
 
 
 def train_model(

@@ -9,7 +9,7 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
-from collections.abc import AsyncIterable, Collection, Iterable, Callable
+from collections.abc import AsyncIterable, Callable, Collection, Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -364,7 +364,7 @@ class KaldiTrainer:
         model_utils_link.symlink_to(ctx.egs_utils_dir, target_is_directory=True)
 
         # 1. prepare_lang.sh
-        self._prepare_lang(ctx)
+        self._prepare_lang(ctx, ARPA, GRAMMAR)
 
         # 2. Generate G.fst from skill graph
         self._create_grammar(ctx, fst_context.fst_file)
@@ -451,8 +451,8 @@ class KaldiTrainer:
             for label in meta_labels:
                 print(label, ctx.sil_phone, file=dictionary_file)
 
-    def _prepare_lang(self, ctx: TrainingContext):
-        for lang_type in (ARPA, GRAMMAR):
+    def _prepare_lang(self, ctx: TrainingContext, *lang_types: str):
+        for lang_type in lang_types:
             prepare_lang = [
                 "bash",
                 str(ctx.egs_utils_dir / "prepare_lang.sh"),
@@ -465,8 +465,15 @@ class KaldiTrainer:
             _LOGGER.debug(prepare_lang)
             subprocess.check_call(prepare_lang, cwd=ctx.train_dir, env=ctx.extended_env)
 
-    def _create_arpa(self, ctx: TrainingContext, fst_file: TextIO):
-        lang_dir = ctx.lang_dir(ARPA)
+    def _create_arpa(
+        self,
+        ctx: TrainingContext,
+        fst_file: TextIO,
+        order: int = 3,
+        suffix: str = ARPA,
+        method: str = "witten_bell",
+    ):
+        lang_dir = ctx.lang_dir(suffix)
         fst_path = lang_dir / "G.arpa.fst"
         text_fst_path = fst_path.with_suffix(".fst.txt")
 
@@ -490,6 +497,7 @@ class KaldiTrainer:
         counts_path = lang_dir / "G.ngram_counts.fst"
         ngram_counts = [
             "ngramcount",
+            f"--order={order}",
             shlex.quote(str(fst_path)),
             shlex.quote(str(counts_path)),
         ]
@@ -500,8 +508,7 @@ class KaldiTrainer:
         lm_fst_path = lang_dir / "G.lm.fst"
         ngram_make = [
             "ngrammake",
-            # "--method=kneser_ney",
-            "--method=witten_bell",
+            f"--method={method}",
             shlex.quote(str(counts_path)),
             shlex.quote(str(lm_fst_path)),
         ]
@@ -653,8 +660,8 @@ class KaldiTranscriber:
         graph_dir: Union[str, Path],
         kaldi_bin_dir: Union[str, Path],
         max_active: int = 7000,
-        lattice_beam: float = 8.0,
-        acoustic_scale: float = 1.0,
+        lattice_beam: float = 10.0,  # 8.0
+        acoustic_scale: float = 0.5,  # 1.0
         beam: float = 24.0,
         model_type: ModelType = ModelType.NNET3,
     ):
@@ -687,7 +694,7 @@ class KaldiTranscriber:
         elif self.model_type == ModelType.GMM:
             text = self._transcribe_wav_gmm(str(wav_path))
         else:
-            raise ValueError(f"Unknown model type: {model_type}")
+            raise ValueError(f"Unknown model type: {self.model_type}")
 
         if text:
             # Success
@@ -751,7 +758,7 @@ class KaldiTranscriber:
 
             # 1. compute-mfcc-feats
             feats_cmd = [
-                str(self.kaldi_dir / "compute-mfcc-feats"),
+                str(self.kaldi_bin_dir / "compute-mfcc-feats"),
                 f"--config={mfcc_conf}",
                 f"scp:echo utt1 {wav_path}|",
                 f"ark,scp:{temp_dir}/feats.ark,{temp_dir}/feats.scp",
@@ -761,7 +768,7 @@ class KaldiTranscriber:
 
             # 2. compute-cmvn-stats
             stats_cmd = [
-                str(self.kaldi_dir / "compute-cmvn-stats"),
+                str(self.kaldi_bin_dir / "compute-cmvn-stats"),
                 f"scp:{temp_dir}/feats.scp",
                 f"ark,scp:{temp_dir}/cmvn.ark,{temp_dir}/cmvn.scp",
             ]
@@ -770,7 +777,7 @@ class KaldiTranscriber:
 
             # 3. apply-cmvn
             norm_cmd = [
-                str(self.kaldi_dir / "apply-cmvn"),
+                str(self.kaldi_bin_dir / "apply-cmvn"),
                 f"scp:{temp_dir}/cmvn.scp",
                 f"scp:{temp_dir}/feats.scp",
                 f"ark,scp:{temp_dir}/feats_cmvn.ark,{temp_dir}/feats_cmvn.scp",
@@ -780,7 +787,7 @@ class KaldiTranscriber:
 
             # 4. add-deltas
             delta_cmd = [
-                str(self.kaldi_dir / "add-deltas"),
+                str(self.kaldi_bin_dir / "add-deltas"),
                 f"scp:{temp_dir}/feats_cmvn.scp",
                 f"ark,scp:{temp_dir}/deltas.ark,{temp_dir}/deltas.scp",
             ]
@@ -789,7 +796,7 @@ class KaldiTranscriber:
 
             # 5. decode
             decode_cmd = [
-                str(self.kaldi_dir / "gmm-latgen-faster"),
+                str(self.kaldi_bin_dir / "gmm-latgen-faster"),
                 f"--word-symbol-table={words_txt}",
                 f"{self.model_dir}/model/final.mdl",
                 f"{self.graph_dir}/HCLG.fst",
@@ -848,7 +855,7 @@ class KaldiTranscriber:
                 str(self.graph_dir / "HCLG.fst"),
                 "ark:echo utt1 utt1|",
                 f"scp:echo utt1 {wav_path}|",
-                "ark:/dev/null",
+                "ark:/tmp/test/lattices.ark",
             ]
         )
 
@@ -1171,6 +1178,20 @@ class KaldiTranscriber:
                 _LOGGER.debug(line)
 
         _LOGGER.debug("Decoder started")
+
+    async def run_async(self, command: List[str], **kwargs) -> bytes:
+        if "stderr" not in kwargs:
+            kwargs["stderr"] = asyncio.subprocess.STDOUT
+
+        proc = await asyncio.create_subprocess_exec(
+            command[0],
+            *command[1:],
+            stdout=asyncio.subprocess.PIPE,
+            **kwargs,
+        )
+
+        stdout, _stderr = await proc.communicate()
+        return stdout
 
     def _fix_text(self, text: str) -> str:
         return text
