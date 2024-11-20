@@ -660,8 +660,8 @@ class KaldiTranscriber:
         graph_dir: Union[str, Path],
         kaldi_bin_dir: Union[str, Path],
         max_active: int = 7000,
-        lattice_beam: float = 10.0,  # 8.0
-        acoustic_scale: float = 0.5,  # 1.0
+        lattice_beam: float = 8.0,
+        acoustic_scale: float = 1.0,
         beam: float = 24.0,
         model_type: ModelType = ModelType.NNET3,
     ):
