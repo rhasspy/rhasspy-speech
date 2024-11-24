@@ -32,6 +32,7 @@ META_VALUE = "__value_"
 META_INTENT = "__intent_"
 
 ARPA = "arpa"
+ARPA_RESCORE = "arpa_rescore"
 GRAMMAR = "grammar"
 
 
@@ -297,6 +298,7 @@ class KaldiTrainer:
         unk: str = UNK,
         spn_phone: str = "SPN",
         sil_phone: str = "SIL",
+        rescore_order: Optional[int] = None,
     ):
         ctx = TrainingContext(
             train_dir=Path(train_dir).absolute(),
@@ -329,6 +331,7 @@ class KaldiTrainer:
 
         # We will train two models:
         # * arpa - uses a 3-gram language model
+        # * arpa_rescore - uses a 5-gram language model for rescoring
         # * grammar - uses a fixed grammar
         for lang_type in (ARPA, GRAMMAR):
             ctx.lang_dir(lang_type).mkdir(parents=True, exist_ok=True)
@@ -369,6 +372,12 @@ class KaldiTrainer:
         # 2. Generate G.fst from skill graph
         self._create_grammar(ctx, fst_context.fst_file)
         self._create_arpa(ctx, fst_context.fst_file)
+
+        if rescore_order is not None:
+            self._prepare_lang(ctx, ARPA_RESCORE)
+            self._create_arpa(
+                ctx, fst_context.fst_file, order=rescore_order, suffix=ARPA_RESCORE
+            )
 
         # 3. mkgraph.sh
         self._mkgraph(ctx, ARPA, GRAMMAR)
@@ -604,12 +613,16 @@ class KaldiTrainer:
 
     def _mkgraph(self, ctx: TrainingContext, *lang_types: str):
         for lang_type in lang_types:
+            lang_dir = ctx.lang_dir(lang_type)
+            if not lang_dir.is_dir():
+                continue
+
             mkgraph = [
                 "bash",
                 str(ctx.egs_utils_dir / "mkgraph.sh"),
                 "--self-loop-scale",
                 "1.0",
-                str(ctx.lang_dir(lang_type)),
+                str(lang_dir),
                 str(ctx.model_dir / "model"),
                 str(ctx.graph_dir(lang_type)),
             ]
@@ -619,33 +632,35 @@ class KaldiTrainer:
     def _prepare_online_decoding(self, ctx: TrainingContext, *lang_types: str):
         for lang_type in lang_types:
             extractor_dir = ctx.model_dir / "extractor"
-            if extractor_dir.is_dir():
-                # Generate online.conf
-                mfcc_conf = ctx.model_dir / "conf" / "mfcc_hires.conf"
-                prepare_online_decoding = [
-                    "bash",
-                    str(
-                        ctx.egs_steps_dir
-                        / "online"
-                        / "nnet3"
-                        / "prepare_online_decoding.sh"
-                    ),
-                    "--mfcc-config",
-                    str(mfcc_conf),
-                    str(ctx.lang_dir(lang_type)),
-                    str(extractor_dir),
-                    str(ctx.model_dir / "model"),
-                    str(ctx.model_dir / "online"),
-                ]
+            if not extractor_dir.is_dir():
+                continue
 
-                _LOGGER.debug(prepare_online_decoding)
-                subprocess.run(
-                    prepare_online_decoding,
-                    cwd=ctx.train_dir,
-                    env=ctx.extended_env,
-                    stderr=subprocess.STDOUT,
-                    check=True,
-                )
+            # Generate online.conf
+            mfcc_conf = ctx.model_dir / "conf" / "mfcc_hires.conf"
+            prepare_online_decoding = [
+                "bash",
+                str(
+                    ctx.egs_steps_dir
+                    / "online"
+                    / "nnet3"
+                    / "prepare_online_decoding.sh"
+                ),
+                "--mfcc-config",
+                str(mfcc_conf),
+                str(ctx.lang_dir(lang_type)),
+                str(extractor_dir),
+                str(ctx.model_dir / "model"),
+                str(ctx.model_dir / "online"),
+            ]
+
+            _LOGGER.debug(prepare_online_decoding)
+            subprocess.run(
+                prepare_online_decoding,
+                cwd=ctx.train_dir,
+                env=ctx.extended_env,
+                stderr=subprocess.STDOUT,
+                check=True,
+            )
 
 
 # -----------------------------------------------------------------------------
@@ -837,6 +852,172 @@ class KaldiTranscriber:
 
         # Failure
         return None
+
+    async def transcribe_wav_nnet3_rescore_async(
+        self,
+        wav_path: str,
+        old_lang_dir: Union[str, Path],
+        new_lang_dir: Union[str, Path],
+    ) -> str:
+        old_lang_dir = Path(old_lang_dir)
+        new_lang_dir = Path(new_lang_dir)
+
+        phi_cmd = " | ".join(
+            (
+                shlex.join(("grep", "-w", "#0", str(new_lang_dir / "words.txt"))),
+                shlex.join(
+                    (
+                        "awk",
+                        "{print $2}",
+                    )
+                ),
+            )
+        )
+        _LOGGER.debug(phi_cmd)
+
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                phi_cmd,
+                stderr=asyncio.subprocess.STDOUT,
+                stdout=asyncio.subprocess.PIPE,
+            )
+            stdout, _stderr = await proc.communicate()
+            phi = int(stdout.decode().strip())
+        except subprocess.CalledProcessError as e:
+            _LOGGER.exception("transcribe_wav_nnet3_rescore_async")
+            _LOGGER.error(e.output)
+            return ""
+
+        ldet_cmd = (
+            " | ".join(
+                (
+                    shlex.join((("fstprint", str(new_lang_dir / "L_disambig.fst")))),
+                    shlex.join(("awk", f"{{if($4 != {phi}){{print;}}}}")),
+                    "fstcompile",
+                    "fstdeterminizestar",
+                    shlex.join(
+                        (
+                            "fstrmsymbols",
+                            str(new_lang_dir / "phones" / "disambig.int"),
+                        )
+                    ),
+                )
+            )
+            + " > "
+            + shlex.quote(str(new_lang_dir / "Ldet.fst"))
+        )
+        _LOGGER.debug(ldet_cmd)
+
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                ldet_cmd,
+                stderr=asyncio.subprocess.STDOUT,
+                stdout=asyncio.subprocess.PIPE,
+            )
+            await proc.communicate()
+        except subprocess.CalledProcessError as e:
+            _LOGGER.exception("transcribe_wav_nnet3_rescore_async")
+            _LOGGER.error(e.output)
+            return ""
+
+        model_file = self.model_dir / "model" / "final.mdl"
+        words_txt = self.graph_dir / "words.txt"
+        online_conf = self.model_dir / "online" / "conf" / "online.conf"
+
+        kaldi_cmd = " | ".join(
+            (
+                shlex.join(
+                    (
+                        str(self.kaldi_bin_dir / "online2-wav-nnet3-latgen-faster"),
+                        "--online=false",
+                        "--do-endpointing=false",
+                        f"--word-symbol-table={words_txt}",
+                        f"--config={online_conf}",
+                        *self.kaldi_args,
+                        str(model_file),
+                        str(self.graph_dir / "HCLG.fst"),
+                        "ark:echo utt1 utt1|",
+                        f"scp:echo utt1 {wav_path}|",
+                        "ark:-",
+                    )
+                ),
+                shlex.join(("lattice-scale", "--lm-scale=0.0", "ark:-", "ark:-")),
+                shlex.join(
+                    ("lattice-to-phone-lattice", str(model_file), "ark:-", "ark:-")
+                ),
+                shlex.join(
+                    (
+                        "lattice-compose",
+                        "ark:-",
+                        str(new_lang_dir / "Ldet.fst"),
+                        "ark:-",
+                    )
+                ),
+                shlex.join(("lattice-determinize", "ark:-", "ark:-")),
+                shlex.join(
+                    (
+                        "lattice-compose",
+                        f"--phi-label={phi}",
+                        "ark:-",
+                        str(new_lang_dir / "G.fst"),
+                        "ark:-",
+                    )
+                ),
+                shlex.join(
+                    (
+                        "lattice-add-trans-probs",
+                        "--transition-scale=1.0",
+                        "--self-loop-scale=0.1",
+                        str(model_file),
+                        "ark:-",
+                        "ark:-",
+                    ),
+                ),
+                shlex.join(("lattice-scale", "--acoustic-scale=0.1", "ark:-", "ark:-")),
+                shlex.join(
+                    (
+                        "lattice-best-path",
+                        f'--word-symbol-table={new_lang_dir / "words.txt"}',
+                        "ark:-",
+                        "ark,t:-",
+                    )
+                ),
+                # TODO
+                shlex.join(
+                    (
+                        "local/kaldi/utils/int2sym.pl",
+                        "-f",
+                        "2-",
+                        str(new_lang_dir / "words.txt"),
+                    )
+                ),
+            )
+        )
+
+        _LOGGER.debug(kaldi_cmd)
+
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                kaldi_cmd,
+                stdout=asyncio.subprocess.PIPE,
+            )
+            stdout, _stderr = await proc.communicate()
+            lines = stdout.decode().splitlines()
+        except subprocess.CalledProcessError as e:
+            _LOGGER.exception("transcribe_wav_nnet3_rescore_async")
+            _LOGGER.error(e.output)
+            lines = []
+
+        text = ""
+        for line in lines:
+            if line.startswith("utt1 "):
+                parts = line.split(maxsplit=1)
+                if len(parts) > 1:
+                    text = parts[1]
+                    _LOGGER.debug(text)
+                    break
+
+        return self._fix_text(text.strip())
 
     async def _transcribe_wav_nnet3_async(self, wav_path: str) -> str:
         words_txt = self.graph_dir / "words.txt"

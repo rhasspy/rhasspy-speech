@@ -91,32 +91,33 @@ def generate_sentences(
 
         for slot_value in slot_values:
             values_in: List[str] = []
+            values_out: List[str] = []
 
             if isinstance(slot_value, str):
-                values_in.append(slot_value)
-                value_out: str = slot_value
-                value_context: Optional[Dict[str, Any]] = None
+                slot_value = {"in": slot_value}
+
+            # - in: text to say
+            #   out: text to output
+            value_in = str(slot_value["in"])
+            if not value_in:
+                # Skip slot value
+                continue
+
+            value_out = slot_value.get("out")
+            value_context = slot_value.get("context")
+
+            if hassil.intents.is_template(value_in):
+                input_expression = hassil.parse_expression.parse_sentence(value_in)
+                for input_text in hassil.sample.sample_expression(
+                    input_expression,
+                ):
+                    values_in.append(input_text)
+                    values_out.append(value_out or input_text)
             else:
-                # - in: text to say
-                #   out: text to output
-                value_in = str(slot_value["in"])
-                if not value_in:
-                    # Skip slot value
-                    continue
+                values_in.append(value_in)
+                values_out.append(value_out or value_in)
 
-                value_out = slot_value.get("out", value_in)
-                value_context = slot_value.get("context")
-
-                if hassil.intents.is_template(value_in):
-                    input_expression = hassil.parse_expression.parse_sentence(value_in)
-                    for input_text in hassil.sample.sample_expression(
-                        input_expression,
-                    ):
-                        values_in.append(input_text)
-                else:
-                    values_in.append(value_in)
-
-            for value_in in values_in:
+            for value_in, value_out in zip(values_in, values_out):
                 slot_list_values.append(
                     TextSlotValue(
                         TextChunk(value_in), value_out=value_out, context=value_context

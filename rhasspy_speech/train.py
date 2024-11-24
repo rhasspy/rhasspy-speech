@@ -24,6 +24,7 @@ def train_model(
     phonetisaurus_bin: Union[str, Path],
     openfst_dir: Optional[Union[str, Path]] = None,
     opengrm_dir: Optional[Union[str, Path]] = None,
+    rescore_order: Optional[int] = None,
 ):
     """Train a model on YAML sentences."""
     model_config: Dict[str, Any] = {}
@@ -68,7 +69,7 @@ def train_model(
             openfst_dir=openfst_dir,
         )
 
-        train_kwargs = {}
+        train_kwargs: Dict[str, Any] = {"rescore_order": rescore_order}
         if "spn_phone" in model_config:
             train_kwargs["spn_phone"] = model_config["spn_phone"]
 
