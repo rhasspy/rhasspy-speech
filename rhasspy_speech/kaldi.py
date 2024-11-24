@@ -858,9 +858,12 @@ class KaldiTranscriber:
         wav_path: str,
         old_lang_dir: Union[str, Path],
         new_lang_dir: Union[str, Path],
+        kaldi_dir: Union[str, Path],
+        rescore_acoustic_scale: float = 0.1,
     ) -> str:
         old_lang_dir = Path(old_lang_dir)
         new_lang_dir = Path(new_lang_dir)
+        kaldi_dir = Path(kaldi_dir)
 
         phi_cmd = " | ".join(
             (
@@ -973,7 +976,14 @@ class KaldiTranscriber:
                         "ark:-",
                     ),
                 ),
-                shlex.join(("lattice-scale", "--acoustic-scale=0.1", "ark:-", "ark:-")),
+                shlex.join(
+                    (
+                        "lattice-scale",
+                        f"--acoustic-scale={rescore_acoustic_scale}",
+                        "ark:-",
+                        "ark:-",
+                    )
+                ),
                 shlex.join(
                     (
                         "lattice-best-path",
@@ -982,10 +992,9 @@ class KaldiTranscriber:
                         "ark,t:-",
                     )
                 ),
-                # TODO
                 shlex.join(
                     (
-                        "local/kaldi/utils/int2sym.pl",
+                        str(kaldi_dir / "utils" / "int2sym.pl"),
                         "-f",
                         "2-",
                         str(new_lang_dir / "words.txt"),
