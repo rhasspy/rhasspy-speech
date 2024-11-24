@@ -194,8 +194,8 @@ class TrainingContext:
             if current_lib_path:
                 lib_dirs.append(current_lib_path)
 
-            self._extended_env["PATH"] = ":".join(bin_dirs)
-            self._extended_env["LD_LIBRARY_PATH"] = ":".join(lib_dirs)
+            self._extended_env["PATH"] = os.pathsep.join(bin_dirs)
+            self._extended_env["LD_LIBRARY_PATH"] = os.pathsep.join(lib_dirs)
 
         return self._extended_env
 
@@ -865,6 +865,22 @@ class KaldiTranscriber:
         new_lang_dir = Path(new_lang_dir)
         kaldi_dir = Path(kaldi_dir)
 
+        extended_env = os.environ.copy()
+        bin_dirs: List[str] = [str(kaldi_dir / "bin"), str(kaldi_dir / "utils")]
+        lib_dirs: List[str] = [str(kaldi_dir / "lib")]
+
+        current_path = extended_env.get("PATH")
+        if current_path:
+            bin_dirs.append(current_path)
+
+        current_lib_path = extended_env.get("LD_LIBRARY_PATH")
+        if current_lib_path:
+            lib_dirs.append(current_lib_path)
+
+        extended_env["PATH"] = os.pathsep.join(bin_dirs)
+        extended_env["LD_LIBRARY_PATH"] = os.pathsep.join(lib_dirs)
+
+        # Get id for #0 disambiguation state
         phi_cmd = " | ".join(
             (
                 shlex.join(("grep", "-w", "#0", str(new_lang_dir / "words.txt"))),
@@ -883,6 +899,7 @@ class KaldiTranscriber:
                 phi_cmd,
                 stderr=asyncio.subprocess.STDOUT,
                 stdout=asyncio.subprocess.PIPE,
+                env=extended_env,
             )
             stdout, _stderr = await proc.communicate()
             phi = int(stdout.decode().strip())
@@ -891,6 +908,7 @@ class KaldiTranscriber:
             _LOGGER.error(e.output)
             return ""
 
+        # Create Ldet.fst
         ldet_cmd = (
             " | ".join(
                 (
@@ -916,6 +934,7 @@ class KaldiTranscriber:
                 ldet_cmd,
                 stderr=asyncio.subprocess.STDOUT,
                 stdout=asyncio.subprocess.PIPE,
+                env=extended_env,
             )
             await proc.communicate()
         except subprocess.CalledProcessError as e:
@@ -1007,8 +1026,7 @@ class KaldiTranscriber:
 
         try:
             proc = await asyncio.create_subprocess_shell(
-                kaldi_cmd,
-                stdout=asyncio.subprocess.PIPE,
+                kaldi_cmd, stdout=asyncio.subprocess.PIPE, env=extended_env
             )
             stdout, _stderr = await proc.communicate()
             lines = stdout.decode().splitlines()
