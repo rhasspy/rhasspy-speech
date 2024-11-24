@@ -897,11 +897,15 @@ class KaldiTranscriber:
         try:
             proc = await asyncio.create_subprocess_shell(
                 phi_cmd,
-                stderr=asyncio.subprocess.STDOUT,
                 stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 env=extended_env,
             )
-            stdout, _stderr = await proc.communicate()
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                _LOGGER.error(stderr.decode())
+                return ""
+
             phi = int(stdout.decode().strip())
         except subprocess.CalledProcessError as e:
             _LOGGER.exception("transcribe_wav_nnet3_rescore_async")
@@ -932,11 +936,14 @@ class KaldiTranscriber:
         try:
             proc = await asyncio.create_subprocess_shell(
                 ldet_cmd,
-                stderr=asyncio.subprocess.STDOUT,
                 stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 env=extended_env,
             )
-            await proc.communicate()
+            _stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                _LOGGER.error(stderr.decode())
+                return ""
         except subprocess.CalledProcessError as e:
             _LOGGER.exception("transcribe_wav_nnet3_rescore_async")
             _LOGGER.error(e.output)
@@ -1026,9 +1033,16 @@ class KaldiTranscriber:
 
         try:
             proc = await asyncio.create_subprocess_shell(
-                kaldi_cmd, stdout=asyncio.subprocess.PIPE, env=extended_env
+                kaldi_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=extended_env,
             )
-            stdout, _stderr = await proc.communicate()
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                _LOGGER.error(stderr.decode())
+                return ""
+
             lines = stdout.decode().splitlines()
         except subprocess.CalledProcessError as e:
             _LOGGER.exception("transcribe_wav_nnet3_rescore_async")
