@@ -858,16 +858,22 @@ class KaldiTranscriber:
         wav_path: str,
         old_lang_dir: Union[str, Path],
         new_lang_dir: Union[str, Path],
-        kaldi_dir: Union[str, Path],
+        tools_dir: Union[str, Path],
         rescore_acoustic_scale: float = 0.1,
     ) -> str:
         old_lang_dir = Path(old_lang_dir)
         new_lang_dir = Path(new_lang_dir)
-        kaldi_dir = Path(kaldi_dir)
+        tools_dir = Path(tools_dir)
+        kaldi_dir = tools_dir / "kaldi"
+        openfst_dir = tools_dir / "openfst"
 
         extended_env = os.environ.copy()
-        bin_dirs: List[str] = [str(kaldi_dir / "bin"), str(kaldi_dir / "utils")]
-        lib_dirs: List[str] = [str(kaldi_dir / "lib")]
+        bin_dirs: List[str] = [
+            str(kaldi_dir / "bin"),
+            str(kaldi_dir / "utils"),
+            str(openfst_dir / "bin"),
+        ]
+        lib_dirs: List[str] = [str(kaldi_dir / "lib"), str(openfst_dir / "lib")]
 
         current_path = extended_env.get("PATH")
         if current_path:
