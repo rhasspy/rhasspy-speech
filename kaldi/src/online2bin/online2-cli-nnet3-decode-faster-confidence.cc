@@ -45,14 +45,14 @@ int main(int argc, char *argv[]) {
     typedef kaldi::int64 int64;
 
     const char *usage =
-        "Reads in audio from a network socket and performs online\n"
+        "Reads in audio from a stdin and performs online\n"
         "decoding with neural nets (nnet3 setup), with iVector-based\n"
         "speaker adaptation and endpointing.\n"
         "Note: some configuration values and inputs are set via config\n"
         "files whose filenames are passed as options\n"
         "\n"
-        "Usage: online2-tcp-nnet3-decode-faster-likelihood [options] <nnet3-in> "
-        "<fst-in> <word-symbol-table> <audio-input-file>\n";
+        "Usage: online2-cli-nnet3-decode-faster-confidence [options] <nnet3-in> "
+        "<fst-in> <word-symbol-table> <audio-input-file> [<lattice-wspecifier>]\n";
 
     ParseOptions po(usage);
 
@@ -76,7 +76,7 @@ int main(int argc, char *argv[]) {
 
     po.Read(argc, argv);
 
-    if (po.NumArgs() != 4) {
+    if (po.NumArgs() < 4) {
       po.PrintUsage();
       return 1;
     }
@@ -85,6 +85,11 @@ int main(int argc, char *argv[]) {
                   fst_rxfilename = po.GetArg(2),
               word_syms_filename = po.GetArg(3),
                   input_filename = po.GetArg(4);
+
+    std::string clat_wspecifier = "ark:/dev/null";
+    if (po.NumArgs() > 4) {
+      clat_wspecifier = po.GetArg(5);
+    }
 
     KALDI_VLOG(1) << "Opening input file...";
     std::ifstream input_file(input_filename, std::fstream::binary);
@@ -124,6 +129,8 @@ int main(int argc, char *argv[]) {
       if (!(word_syms = fst::SymbolTable::ReadText(word_syms_filename)))
         KALDI_ERR << "Could not read symbol table from file "
                   << word_syms_filename;
+
+    CompactLatticeWriter clat_writer(clat_wspecifier);
 
     std::string line;
     std::size_t samples_to_read;
@@ -245,6 +252,14 @@ int main(int argc, char *argv[]) {
 
             KALDI_VLOG(1) << "EndOfAudio, sending message: " << msg_str;
             std::cout << msg_str << std::endl;
+
+            // we want to output the lattice with un-scaled acoustics.
+            BaseFloat inv_acoustic_scale =
+                1.0 / decodable_opts.acoustic_scale;
+            ScaleLattice(AcousticLatticeScale(inv_acoustic_scale), &lat);
+
+            clat_writer.Write("utt", lat);
+
           } else {
             // Blank line for no result
             std::cout << std::endl;
