@@ -1010,20 +1010,31 @@ class KaldiTranscriber:
                 ),
                 shlex.join(
                     (
-                        "lattice-scale",
-                        f"--acoustic-scale={rescore_acoustic_scale}",
-                        "ark:-",
-                        "ark:-",
-                    )
-                ),
-                shlex.join(
-                    (
                         "lattice-best-path",
                         f'--word-symbol-table={new_lang_dir / "words.txt"}',
+                        f"--acoustic-scale={rescore_acoustic_scale}",
                         "ark:-",
                         "ark,t:-",
                     )
                 ),
+                # TODO: nbest
+                # shlex.join(
+                #     (
+                #         "lattice-to-nbest",
+                #         "--n=5",
+                #         f"--acoustic-scale={rescore_acoustic_scale}",
+                #         "ark:-",
+                #         "ark:-",
+                #     )
+                # ),
+                # shlex.join(
+                #     (
+                #         "nbest-to-linear",
+                #         "ark:-",
+                #         "ark:/dev/null",  # alignments
+                #         "ark,t:-",  # transcriptions
+                #     )
+                # ),
                 shlex.join(
                     (
                         str(kaldi_dir / "utils" / "int2sym.pl"),
@@ -1062,7 +1073,6 @@ class KaldiTranscriber:
                 if len(parts) > 1:
                     text = parts[1]
                     _LOGGER.debug(text)
-                    break
 
         return self._fix_text(text.strip())
 
