@@ -1311,6 +1311,7 @@ class KaldiTranscriber:
 
         kaldi_cmd = (
             [
+                # TODO: Add lattice writing option for rescoring
                 str(self.kaldi_bin_dir / "online2-cli-nnet3-decode-faster-confidence"),
                 f"--config={online_conf}",
             ]
