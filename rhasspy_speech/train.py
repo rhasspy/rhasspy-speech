@@ -11,19 +11,19 @@ from hassil.util import merge_dict
 from unicode_rbnf import RbnfEngine
 from yaml import safe_load
 
+from .const import WordCasing
 from .g2p import LexiconDatabase, get_sounds_like
-from .kaldi import KaldiTrainer, WordCasing, intents_to_fst
+from .intent_fst import intents_to_fst
+from .kaldi import KaldiTrainer
+from .tools import KaldiTools
 
 
-def train_model(
+async def train_model(
     language: str,
     sentence_files: Iterable[Union[str, Path]],
-    kaldi_dir: Union[str, Path],
-    model_dir: Union[str, Path],
     train_dir: Union[str, Path],
-    phonetisaurus_bin: Union[str, Path],
-    openfst_dir: Optional[Union[str, Path]] = None,
-    opengrm_dir: Optional[Union[str, Path]] = None,
+    model_dir: Union[str, Path],
+    tools: KaldiTools,
     rescore_order: Optional[int] = None,
 ):
     """Train a model on YAML sentences."""
@@ -61,16 +61,17 @@ def train_model(
             number_engine=number_engine,
             word_casing=word_casing,
         )
+
+        trainer_args: Dict[str, Any] = {}  # {"rescore_order": rescore_order}
+        if "spn_phone" in model_config:
+            trainer_args["spn_phone"] = model_config["spn_phone"]
+
         trainer = KaldiTrainer(
-            kaldi_dir=kaldi_dir,
+            train_dir=train_dir,
             model_dir=os.path.join(model_dir, "model"),
-            phonetisaurus_bin=phonetisaurus_bin,
-            opengrm_dir=opengrm_dir,
-            openfst_dir=openfst_dir,
+            tools=tools,
+            fst_context=fst_context,
+            **trainer_args,
         )
 
-        train_kwargs: Dict[str, Any] = {"rescore_order": rescore_order}
-        if "spn_phone" in model_config:
-            train_kwargs["spn_phone"] = model_config["spn_phone"]
-
-        trainer.train(fst_context, train_dir, **train_kwargs)
+        await trainer.train(rescore_order=rescore_order)

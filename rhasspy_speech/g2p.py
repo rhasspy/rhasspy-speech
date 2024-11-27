@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+"""Grapheme to phoneme methods."""
+
 import itertools
 import sqlite3
 import subprocess

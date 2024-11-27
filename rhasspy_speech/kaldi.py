@@ -6,337 +6,98 @@ import logging
 import os
 import shlex
 import shutil
-import sqlite3
 import subprocess
 import tempfile
-from collections.abc import AsyncIterable, Callable, Collection, Iterable
-from dataclasses import dataclass, field
-from enum import Enum
+from collections.abc import AsyncIterable, Iterable
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, TextIO, Union
+from typing import List, Optional, Union
 
-from unicode_rbnf import RbnfEngine
-
-from .g2p import LexiconDatabase, split_words
-from .sentences import generate_sentences
+from .const import EPS, SIL, SPN, UNK, LangSuffix, ModelType
+from .intent_fst import IntentsToFstContext
+from .tools import KaldiTools
 
 _LOGGER = logging.getLogger(__name__)
-
-EPS = "<eps>"
-UNK = "<unk>"
-SPACE = "▁"
-
-META_BEGIN = "__begin_"
-META_END = "__end_"
-META_VALUE = "__value_"
-META_INTENT = "__intent_"
-
-ARPA = "arpa"
-ARPA_RESCORE = "arpa_rescore"
-GRAMMAR = "grammar"
-
-
-class ModelType(str, Enum):
-    NNET3 = "nnet3"
-    GMM = "gmm"
-
-
-class WordCasing(str, Enum):
-    KEEP = "keep"
-    LOWER = "lower"
-    UPPER = "upper"
-
-    @staticmethod
-    def get_function(casing: "WordCasing") -> Callable[[str], str]:
-        if casing == WordCasing.LOWER:
-            return str.lower
-
-        if casing == WordCasing.UPPER:
-            return str.upper
-
-        return lambda s: s
-
-
-@dataclass
-class IntentsToFstContext:
-    fst_file: TextIO
-    lexicon: LexiconDatabase
-    number_engine: RbnfEngine
-    current_state: Optional[int] = None
-    eps: str = EPS
-    vocab: Set[str] = field(default_factory=set)
-    meta_labels: Set[str] = field(default_factory=set)
-    word_casing: WordCasing = WordCasing.LOWER
-
-    def next_state(self) -> int:
-        if self.current_state is None:
-            self.current_state = 0
-        else:
-            self.current_state += 1
-
-        return self.current_state
-
-    def next_edge(
-        self,
-        from_state: int,
-        from_label: Optional[str] = None,
-        to_label: Optional[str] = None,
-        log_prob: Optional[float] = None,
-    ) -> int:
-        to_state = self.next_state()
-        self.add_edge(from_state, to_state, from_label, to_label, log_prob)
-        return to_state
-
-    def add_edge(
-        self,
-        from_state: int,
-        to_state: int,
-        from_label: Optional[str] = None,
-        to_label: Optional[str] = None,
-        log_prob: Optional[float] = None,
-    ) -> None:
-        if from_label is None:
-            from_label = self.eps
-
-        if to_label is None:
-            to_label = from_label
-
-        if (" " in from_label) or (" " in to_label):
-            raise ValueError(
-                f"Cannot have white space in labels: from={from_label}, to={to_label}"
-            )
-
-        if (not from_label) or (not to_label):
-            raise ValueError(
-                f"Labels cannot be empty: from={from_label}, to={to_label}"
-            )
-
-        if log_prob is None:
-            print(from_state, to_state, from_label, to_label, file=self.fst_file)
-        else:
-            print(
-                from_state, to_state, from_label, to_label, log_prob, file=self.fst_file
-            )
-
-    def accept(self, state: int) -> None:
-        print(state, file=self.fst_file)
-
-
-@dataclass
-class TrainingContext:
-    train_dir: Path
-    kaldi_dir: Path
-    model_dir: Path
-    vocab: Collection[str]
-    fst_context: IntentsToFstContext
-    opengrm_dir: Optional[Path] = None
-    openfst_dir: Optional[Path] = None
-    eps: str = EPS
-    unk: str = UNK
-    spn_phone: str = "SPN"
-    sil_phone: str = "SIL"
-
-    _extended_env: Optional[Dict[str, Any]] = None
-
-    @property
-    def egs_utils_dir(self):
-        return self.kaldi_dir / "utils"
-
-    @property
-    def egs_steps_dir(self):
-        return self.kaldi_dir / "steps"
-
-    @property
-    def conf_dir(self):
-        return self.train_dir / "conf"
-
-    @property
-    def data_dir(self):
-        return self.train_dir / "data"
-
-    @property
-    def data_local_dir(self):
-        return self.data_dir / "local"
-
-    def lang_dir(self, suffix: str):
-        return self.data_dir / f"lang_{suffix}"
-
-    @property
-    def dict_local_dir(self):
-        return self.data_local_dir / "dict"
-
-    def lang_local_dir(self, suffix: str):
-        return self.data_local_dir / f"lang_{suffix}"
-
-    def graph_dir(self, suffix: str):
-        return self.train_dir / f"graph_{suffix}"
-
-    @property
-    def extended_env(self) -> Dict[str, str]:
-        if self._extended_env is None:
-            self._extended_env = os.environ.copy()
-            bin_dirs: List[str] = [str(self.kaldi_dir / "bin"), str(self.egs_utils_dir)]
-            lib_dirs: List[str] = [str(self.kaldi_dir / "lib")]
-
-            if self.opengrm_dir:
-                bin_dirs.append(str(self.opengrm_dir / "bin"))
-                lib_dirs.append(str(self.opengrm_dir / "lib"))
-
-            if self.openfst_dir:
-                bin_dirs.append(str(self.openfst_dir / "bin"))
-                lib_dirs.append(str(self.openfst_dir / "lib"))
-
-            current_path = self._extended_env.get("PATH")
-            if current_path:
-                bin_dirs.append(current_path)
-
-            current_lib_path = self._extended_env.get("LD_LIBRARY_PATH")
-            if current_lib_path:
-                lib_dirs.append(current_lib_path)
-
-            self._extended_env["PATH"] = os.pathsep.join(bin_dirs)
-            self._extended_env["LD_LIBRARY_PATH"] = os.pathsep.join(lib_dirs)
-
-        return self._extended_env
-
-    def run(self, *args, **kwargs):
-        if "cwd" not in kwargs:
-            kwargs["cwd"] = self.train_dir
-
-        if "env" not in kwargs:
-            kwargs["env"] = self.extended_env
-
-        return subprocess.check_call(*args, **kwargs)
-
-
-def intents_to_fst(
-    train_dir: Union[str, Path],
-    sentence_yaml: Dict[str, Any],
-    fst_file: TextIO,
-    lexicon: LexiconDatabase,
-    number_engine: RbnfEngine,
-    word_casing: WordCasing = WordCasing.LOWER,
-    eps: str = "<eps>",
-) -> IntentsToFstContext:
-    context = IntentsToFstContext(
-        fst_file=fst_file, lexicon=lexicon, number_engine=number_engine, eps=eps
-    )
-    root_state = context.next_state()
-    final_state = context.next_state()
-
-    num_sentences = 0
-    sentences_db_path = os.path.join(train_dir, "sentences.db")
-    used_sentences: Set[str] = set()
-    casing_func = WordCasing.get_function(word_casing)
-    with sqlite3.Connection(sentences_db_path) as sentences_db:
-        sentences_db.execute("DROP TABLE IF EXISTS sentences")
-        sentences_db.execute("CREATE TABLE sentences (input TEXT, output TEXT)")
-        sentences_db.execute("CREATE INDEX idx_input ON sentences (input)")
-
-        for input_text, output_text in generate_sentences(sentence_yaml, number_engine):
-            input_words = [
-                casing_func(w) for w in split_words(input_text, lexicon, number_engine)
-            ]
-            input_text = " ".join(input_words)
-
-            if input_text in used_sentences:
-                continue
-
-            used_sentences.add(input_text)
-
-            sentences_db.execute(
-                "INSERT INTO sentences (input, output) VALUES (?, ?)",
-                (input_text, output_text),
-            )
-
-            state = root_state
-            context.vocab.update(input_words)
-
-            for word in input_words:
-                state = context.next_edge(state, word, word)
-
-            context.add_edge(state, final_state)
-            num_sentences += 1
-
-    context.accept(final_state)
-    context.fst_file.seek(0)
-
-    _LOGGER.debug("Generated %s sentence(s)", num_sentences)
-
-    return context
-
-
-# -----------------------------------------------------------------------------
 
 
 class KaldiTrainer:
     def __init__(
         self,
-        kaldi_dir: Union[str, Path],
-        model_dir: Union[str, Path],
-        phonetisaurus_bin: Union[str, Path],
-        opengrm_dir: Optional[Union[str, Path]] = None,
-        openfst_dir: Optional[Union[str, Path]] = None,
-    ):
-        self.kaldi_dir = Path(kaldi_dir).absolute()
-        self.model_dir = Path(model_dir).absolute()
-        self.phonetisaurus_bin = Path(phonetisaurus_bin)
-
-        self.opengrm_dir: Optional[Path] = None
-        if opengrm_dir:
-            self.opengrm_dir = Path(opengrm_dir).absolute()
-
-        self.openfst_dir: Optional[Path] = None
-        if openfst_dir:
-            self.openfst_dir = Path(openfst_dir).absolute()
-
-    def train(
-        self,
-        fst_context: IntentsToFstContext,
         train_dir: Union[str, Path],
+        model_dir: Union[str, Path],
+        tools: KaldiTools,
+        fst_context: IntentsToFstContext,
         eps: str = EPS,
         unk: str = UNK,
-        spn_phone: str = "SPN",
-        sil_phone: str = "SIL",
+        spn_phone: str = SPN,
+        sil_phone: str = SIL,
+    ) -> None:
+        self.train_dir = Path(train_dir).absolute()
+        self.model_dir = Path(model_dir).absolute()
+        self.tools = tools
+        self.fst_context = fst_context
+        self.eps = eps
+        self.unk = unk
+        self.spn_phone = spn_phone
+        self.sil_phone = sil_phone
+
+    @property
+    def conf_dir(self) -> Path:
+        return self.train_dir / "conf"
+
+    def graph_dir(self, suffix: Optional[str] = None) -> Path:
+        if suffix:
+            return self.train_dir / f"graph_{suffix}"
+
+        return self.train_dir / "graph"
+
+    @property
+    def data_dir(self) -> Path:
+        return self.train_dir / "data"
+
+    @property
+    def data_local_dir(self) -> Path:
+        return self.data_dir / "local"
+
+    def lang_dir(self, suffix: Optional[str] = None) -> Path:
+        if suffix:
+            return self.data_dir / f"lang_{suffix}"
+
+        return self.data_dir / "lang"
+
+    @property
+    def dict_local_dir(self) -> Path:
+        return self.data_local_dir / "dict"
+
+    def lang_local_dir(self, suffix: Optional[str] = None) -> Path:
+        if suffix:
+            return self.data_local_dir / f"lang_{suffix}"
+
+        return self.data_local_dir / "lang"
+
+    # -------------------------------------------------------------------------
+
+    async def train(
+        self,
         rescore_order: Optional[int] = None,
-    ):
-        ctx = TrainingContext(
-            train_dir=Path(train_dir).absolute(),
-            kaldi_dir=self.kaldi_dir,
-            model_dir=self.model_dir,
-            opengrm_dir=self.opengrm_dir,
-            openfst_dir=self.openfst_dir,
-            vocab=fst_context.vocab,
-            fst_context=fst_context,
-            eps=eps,
-            unk=unk,
-            spn_phone=spn_phone,
-            sil_phone=sil_phone,
-        )
-
-        # ---------------------------------------------------------------------
-
+    ) -> None:
         # Extend PATH
-        ctx.train_dir.mkdir(parents=True, exist_ok=True)
+        self.train_dir.mkdir(parents=True, exist_ok=True)
 
         # Copy conf
-        if ctx.conf_dir.exists():
-            shutil.rmtree(ctx.conf_dir)
+        if self.conf_dir.exists():
+            shutil.rmtree(self.conf_dir)
 
-        shutil.copytree(self.model_dir / "conf", ctx.conf_dir)
+        shutil.copytree(self.model_dir / "conf", self.conf_dir)
 
         # Delete existing data/graph
-        if ctx.data_dir.exists():
-            shutil.rmtree(ctx.data_dir)
+        if self.data_dir.exists():
+            shutil.rmtree(self.data_dir)
 
-        # We will train two models:
-        # * arpa - uses a 3-gram language model
-        # * arpa_rescore - uses a 5-gram language model for rescoring
-        # * grammar - uses a fixed grammar
-        for lang_type in (ARPA, GRAMMAR):
-            ctx.lang_dir(lang_type).mkdir(parents=True, exist_ok=True)
-            if ctx.graph_dir(lang_type).exists():
-                shutil.rmtree(ctx.graph_dir(lang_type))
+        for graph_dir in self.train_dir.glob("graph_*"):
+            if not graph_dir.is_dir():
+                continue
+
+            shutil.rmtree(graph_dir)
 
         # ---------------------------------------------------------------------
         # Kaldi Training
@@ -348,48 +109,43 @@ class KaldiTrainer:
         # ---------------------------------------------------------
 
         # Create empty path.sh
-        path_sh = ctx.train_dir / "path.sh"
+        path_sh = self.train_dir / "path.sh"
         if not path_sh.is_file():
             path_sh.write_text("")
 
         # Write pronunciation dictionary
-        self._create_lexicon(ctx, fst_context.meta_labels)
+        await self._create_lexicon()
 
         # Create utils link
-        model_utils_link = ctx.train_dir / "utils"
-
-        try:
-            # Can't use missing_ok in 3.6
-            model_utils_link.unlink()
-        except Exception:
-            pass
-
-        model_utils_link.symlink_to(ctx.egs_utils_dir, target_is_directory=True)
+        model_utils_link = self.train_dir / "utils"
+        model_utils_link.unlink(missing_ok=True)
+        model_utils_link.symlink_to(self.tools.egs_utils_dir, target_is_directory=True)
 
         # 1. prepare_lang.sh
-        self._prepare_lang(ctx, ARPA, GRAMMAR)
+        await self._prepare_lang(LangSuffix.GRAMMAR)
+        await self._prepare_lang(LangSuffix.ARPA)
 
         # 2. Generate G.fst from skill graph
-        self._create_grammar(ctx, fst_context.fst_file)
-        self._create_arpa(ctx, fst_context.fst_file)
+        await self._create_grammar(LangSuffix.GRAMMAR)
+        await self._create_arpa(LangSuffix.ARPA)
 
         if rescore_order is not None:
-            self._prepare_lang(ctx, ARPA_RESCORE)
-            self._create_arpa(
-                ctx, fst_context.fst_file, order=rescore_order, suffix=ARPA_RESCORE
-            )
+            await self._prepare_lang(LangSuffix.ARPA_RESCORE)
+            await self._create_arpa(LangSuffix.ARPA_RESCORE, order=5)
 
         # 3. mkgraph.sh
-        self._mkgraph(ctx, ARPA, GRAMMAR)
+        await self._mkgraph(LangSuffix.GRAMMAR)
+        await self._mkgraph(LangSuffix.ARPA)
 
         # 4. prepare_online_decoding.sh
-        self._prepare_online_decoding(ctx, ARPA, GRAMMAR)
+        await self._prepare_online_decoding(LangSuffix.GRAMMAR)
+        await self._prepare_online_decoding(LangSuffix.ARPA)
 
     # -------------------------------------------------------------------------
 
-    def _create_lexicon(self, ctx: TrainingContext, meta_labels: Iterable[str]):
+    async def _create_lexicon(self) -> None:
         _LOGGER.debug("Generating lexicon")
-        dict_local_dir = ctx.data_local_dir / "dict"
+        dict_local_dir = self.data_local_dir / "dict"
         dict_local_dir.mkdir(parents=True, exist_ok=True)
 
         # Copy phones
@@ -399,10 +155,13 @@ class KaldiTrainer:
 
         # Create dictionary
         dictionary_path = dict_local_dir / "lexicon.txt"
-        lexicon = ctx.fst_context.lexicon
+        lexicon = self.fst_context.lexicon
         with open(dictionary_path, "w", encoding="utf-8") as dictionary_file:
             missing_words = set()
-            for word in sorted(ctx.vocab):
+            for word in sorted(self.fst_context.vocab):
+                if word in (self.unk,):
+                    continue
+
                 word_found = False
                 for word_pron in lexicon.lookup(word):
                     phonemes_str = " ".join(word_pron)
@@ -414,7 +173,7 @@ class KaldiTrainer:
 
             if missing_words:
                 g2p_model_path = self.model_dir.parent / "g2p.fst"
-                missing_words_path = ctx.train_dir / "missing_words_dictionary.txt"
+                missing_words_path = self.train_dir / "missing_words_dictionary.txt"
                 with tempfile.NamedTemporaryFile(
                     mode="w+", suffix=".txt", encoding="utf-8"
                 ) as missing_words_file, open(
@@ -426,12 +185,14 @@ class KaldiTrainer:
 
                     missing_words_file.seek(0)
                     phonetisaurus_output = (
-                        subprocess.check_output(
-                            [
-                                str(self.phonetisaurus_bin),
-                                f"--model={g2p_model_path}",
-                                f"--wordlist={missing_words_file.name}",
-                            ]
+                        (
+                            await self.tools.async_run(
+                                str(self.tools.phonetisaurus_bin),
+                                [
+                                    f"--model={g2p_model_path}",
+                                    f"--wordlist={missing_words_file.name}",
+                                ],
+                            )
                         )
                         .decode()
                         .splitlines()
@@ -453,214 +214,163 @@ class KaldiTrainer:
                             )
                             print(word, phonemes, file=dictionary_file)
 
-            if ctx.unk not in ctx.vocab:
-                # Add <unk>
-                print(ctx.unk, ctx.spn_phone, file=dictionary_file)
+            # Add <unk>
+            print(self.unk, self.spn_phone, file=dictionary_file)
 
-            for label in meta_labels:
-                print(label, ctx.sil_phone, file=dictionary_file)
+            for label in self.fst_context.meta_labels:
+                print(label, self.sil_phone, file=dictionary_file)
 
-    def _prepare_lang(self, ctx: TrainingContext, *lang_types: str):
-        for lang_type in lang_types:
-            prepare_lang = [
-                "bash",
-                str(ctx.egs_utils_dir / "prepare_lang.sh"),
-                str(ctx.dict_local_dir),
-                ctx.unk,
-                str(ctx.lang_local_dir(lang_type)),
-                str(ctx.lang_dir(lang_type)),
-            ]
+    async def _prepare_lang(self, lang_type: LangSuffix) -> None:
+        await self.tools.async_run(
+            "bash",
+            [
+                str(self.tools.egs_utils_dir / "prepare_lang.sh"),
+                str(self.dict_local_dir),
+                self.unk,
+                str(self.lang_local_dir(lang_type.value)),
+                str(self.lang_dir(lang_type.value)),
+            ],
+            cwd=self.train_dir,
+        )
 
-            _LOGGER.debug(prepare_lang)
-            subprocess.check_call(prepare_lang, cwd=ctx.train_dir, env=ctx.extended_env)
-
-    def _create_arpa(
+    async def _create_arpa(
         self,
-        ctx: TrainingContext,
-        fst_file: TextIO,
+        lang_type: LangSuffix,
         order: int = 3,
-        suffix: str = ARPA,
         method: str = "witten_bell",
-    ):
-        lang_dir = ctx.lang_dir(suffix)
+    ) -> None:
+        lang_dir = self.lang_dir(lang_type.value)
         fst_path = lang_dir / "G.arpa.fst"
         text_fst_path = fst_path.with_suffix(".fst.txt")
+        arpa_path = lang_dir / "lm.arpa"
 
         with open(text_fst_path, "w", encoding="utf-8") as text_fst_file:
-            fst_file.seek(0)
-            shutil.copyfileobj(fst_file, text_fst_file)
+            self.fst_context.fst_file.seek(0)
+            shutil.copyfileobj(self.fst_context.fst_file, text_fst_file)
 
-        compile_fst = [
+        await self.tools.async_run(
             "fstcompile",
-            shlex.quote(f"--isymbols={lang_dir}/words.txt"),
-            shlex.quote(f"--osymbols={lang_dir}/words.txt"),
-            "--keep_isymbols=true",
-            "--keep_osymbols=true",
-            shlex.quote(str(text_fst_path)),
-            shlex.quote(str(fst_path)),
-        ]
+            [
+                shlex.quote(f"--isymbols={lang_dir}/words.txt"),
+                shlex.quote(f"--osymbols={lang_dir}/words.txt"),
+                "--keep_isymbols=true",
+                "--keep_osymbols=true",
+                shlex.quote(str(text_fst_path)),
+                shlex.quote(str(fst_path)),
+            ],
+        )
+        await self.tools.async_run_pipeline(
+            [
+                "ngramcount",
+                f"--order={order}",
+                shlex.quote(str(fst_path)),
+                "-",
+            ],
+            [
+                "ngrammake",
+                f"--method={method}",
+            ],
+            [
+                "ngramprint",
+                "--ARPA",
+                "-",
+                shlex.quote(str(arpa_path)),
+            ],
+        )
 
-        _LOGGER.debug(compile_fst)
-        ctx.run(compile_fst)
-
-        counts_path = lang_dir / "G.ngram_counts.fst"
-        ngram_counts = [
-            "ngramcount",
-            f"--order={order}",
-            shlex.quote(str(fst_path)),
-            shlex.quote(str(counts_path)),
-        ]
-
-        _LOGGER.debug(ngram_counts)
-        ctx.run(ngram_counts)
-
-        lm_fst_path = lang_dir / "G.lm.fst"
-        ngram_make = [
-            "ngrammake",
-            f"--method={method}",
-            shlex.quote(str(counts_path)),
-            shlex.quote(str(lm_fst_path)),
-        ]
-
-        _LOGGER.debug(ngram_make)
-        ctx.run(ngram_make)
-
-        arpa_path = lang_dir / "lm.arpa"
-        ngram_print = [
-            "ngramprint",
-            "--ARPA",
-            shlex.quote(str(lm_fst_path)),
-            shlex.quote(str(arpa_path)),
-        ]
-
-        _LOGGER.debug(ngram_print)
-        ctx.run(ngram_print)
-
-        lang_local_dir = ctx.lang_local_dir(ARPA)
+        lang_local_dir = self.lang_local_dir(lang_type.value)
         arpa_gz_path = lang_local_dir / "lm.arpa.gz"
         with open(arpa_path, "r", encoding="utf-8") as arpa_file, gzip.open(
             arpa_gz_path, "wt", encoding="utf-8"
         ) as arpa_gz_file:
             shutil.copyfileobj(arpa_file, arpa_gz_file)
 
-        format_lm = [
+        await self.tools.async_run(
             "bash",
-            str(ctx.egs_utils_dir / "format_lm.sh"),
-            str(lang_dir),
-            str(arpa_gz_path),
-            str(ctx.dict_local_dir / "lexicon.txt"),
-            str(lang_dir),
-        ]
+            [
+                str(self.tools.egs_utils_dir / "format_lm.sh"),
+                str(lang_dir),
+                str(arpa_gz_path),
+                str(self.dict_local_dir / "lexicon.txt"),
+                str(lang_dir),
+            ],
+        )
 
-        _LOGGER.debug(format_lm)
-        ctx.run(format_lm)
-
-    def _create_grammar(self, ctx: TrainingContext, fst_file: TextIO):
-        lang_dir = ctx.lang_dir(GRAMMAR)
+    async def _create_grammar(self, lang_type: LangSuffix) -> None:
+        fst_file = self.fst_context.fst_file
+        lang_dir = self.lang_dir(lang_type.value)
         fst_path = lang_dir / "G.fst"
-        unsorted_fst_path = fst_path.with_suffix(".fst.unsorted")
         text_fst_path = fst_path.with_suffix(".fst.txt")
 
         with open(text_fst_path, "w", encoding="utf-8") as text_fst_file:
             fst_file.seek(0)
             shutil.copyfileobj(fst_file, text_fst_file)
 
-        compile_grammar = [
-            "fstcompile",
-            shlex.quote(f"--isymbols={lang_dir}/words.txt"),
-            shlex.quote(f"--osymbols={lang_dir}/words.txt"),
-            "--keep_isymbols=false",
-            "--keep_osymbols=false",
-            "--keep_state_numbering=true",
-            shlex.quote(str(text_fst_path)),
-            shlex.quote(str(unsorted_fst_path)),
-        ]
+        await self.tools.async_run_pipeline(
+            [
+                "fstcompile",
+                shlex.quote(f"--isymbols={lang_dir}/words.txt"),
+                shlex.quote(f"--osymbols={lang_dir}/words.txt"),
+                "--keep_isymbols=false",
+                "--keep_osymbols=false",
+                "--keep_state_numbering=true",
+                shlex.quote(str(text_fst_path)),
+                "-",
+            ],
+            ["fstdeterminize"],
+            ["fstminimize"],
+            [
+                "fstarcsort",
+                "--sort_type=ilabel",
+                "-",
+                shlex.quote(str(fst_path)),
+            ],
+        )
 
-        _LOGGER.debug(compile_grammar)
-        ctx.run(compile_grammar)
+    async def _mkgraph(self, lang_type: LangSuffix) -> None:
+        lang_dir = self.lang_dir(lang_type.value)
+        if not lang_dir.is_dir():
+            _LOGGER.warning("Lang dir does not exist: %s", lang_dir)
+            return
 
-        # determinize/minimize
-        determinized_fst_path = fst_path.with_suffix(".fst.determinized")
-        determinize = [
-            "fstdeterminize",
-            shlex.quote(str(unsorted_fst_path)),
-            shlex.quote(str(determinized_fst_path)),
-        ]
-
-        _LOGGER.debug(determinize)
-        ctx.run(determinize)
-
-        minimized_fst_path = fst_path.with_suffix(".fst.minimized")
-        minimize = [
-            "fstminimize",
-            shlex.quote(str(determinized_fst_path)),
-            shlex.quote(str(minimized_fst_path)),
-        ]
-
-        _LOGGER.debug(minimize)
-        ctx.run(minimize)
-
-        arcsort = [
-            "fstarcsort",
-            "--sort_type=ilabel",
-            shlex.quote(str(minimized_fst_path)),
-            shlex.quote(str(fst_path)),
-        ]
-
-        _LOGGER.debug(arcsort)
-        ctx.run(arcsort)
-        unsorted_fst_path.unlink()
-
-    def _mkgraph(self, ctx: TrainingContext, *lang_types: str):
-        for lang_type in lang_types:
-            lang_dir = ctx.lang_dir(lang_type)
-            if not lang_dir.is_dir():
-                continue
-
-            mkgraph = [
-                "bash",
-                str(ctx.egs_utils_dir / "mkgraph.sh"),
+        await self.tools.async_run(
+            "bash",
+            [
+                str(self.tools.egs_utils_dir / "mkgraph.sh"),
                 "--self-loop-scale",
                 "1.0",
                 str(lang_dir),
-                str(ctx.model_dir / "model"),
-                str(ctx.graph_dir(lang_type)),
-            ]
-            _LOGGER.debug(mkgraph)
-            ctx.run(mkgraph)
+                str(self.model_dir / "model"),
+                str(self.graph_dir(lang_type.value)),
+            ],
+        )
 
-    def _prepare_online_decoding(self, ctx: TrainingContext, *lang_types: str):
-        for lang_type in lang_types:
-            extractor_dir = ctx.model_dir / "extractor"
-            if not extractor_dir.is_dir():
-                continue
+    async def _prepare_online_decoding(self, lang_type: LangSuffix) -> None:
+        extractor_dir = self.model_dir / "extractor"
+        if not extractor_dir.is_dir():
+            _LOGGER.warning("Extractor dir does not exist: %s", extractor_dir)
+            return
 
-            # Generate online.conf
-            mfcc_conf = ctx.model_dir / "conf" / "mfcc_hires.conf"
-            prepare_online_decoding = [
-                "bash",
+        # Generate online.conf
+        mfcc_conf = self.model_dir / "conf" / "mfcc_hires.conf"
+        await self.tools.async_run(
+            "bash",
+            [
                 str(
-                    ctx.egs_steps_dir
+                    self.tools.egs_steps_dir
                     / "online"
                     / "nnet3"
                     / "prepare_online_decoding.sh"
                 ),
                 "--mfcc-config",
                 str(mfcc_conf),
-                str(ctx.lang_dir(lang_type)),
+                str(self.lang_dir(lang_type.value)),
                 str(extractor_dir),
-                str(ctx.model_dir / "model"),
-                str(ctx.model_dir / "online"),
-            ]
-
-            _LOGGER.debug(prepare_online_decoding)
-            subprocess.run(
-                prepare_online_decoding,
-                cwd=ctx.train_dir,
-                env=ctx.extended_env,
-                stderr=subprocess.STDOUT,
-                check=True,
-            )
+                str(self.model_dir / "model"),
+                str(self.model_dir / "online"),
+            ],
+            cwd=self.train_dir,
+        )
 
 
 # -----------------------------------------------------------------------------
@@ -824,7 +534,7 @@ class KaldiTranscriber:
             try:
                 lines = (
                     subprocess.check_output(decode_cmd, stderr=subprocess.STDOUT)
-                    .decode()
+                    .decode(encoding="utf-8")
                     .splitlines()
                 )
             except subprocess.CalledProcessError as e:
@@ -1417,23 +1127,6 @@ class KaldiTranscriber:
                 _LOGGER.debug(line)
 
         _LOGGER.debug("Decoder started")
-
-    async def run_async(self, command: List[str], **kwargs) -> bytes:
-        if "stderr" not in kwargs:
-            kwargs["stderr"] = asyncio.subprocess.STDOUT
-
-        proc = await asyncio.create_subprocess_exec(
-            command[0],
-            *command[1:],
-            stdout=asyncio.subprocess.PIPE,
-            **kwargs,
-        )
-
-        stdout, _stderr = await proc.communicate()
-        return stdout
-
-    def _fix_text(self, text: str) -> str:
-        return text
 
 
 def grouper(iterable, n, fillvalue=None):
