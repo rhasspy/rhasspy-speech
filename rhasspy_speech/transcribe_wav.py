@@ -1,11 +1,14 @@
 """Transcribe WAV files."""
 
 import asyncio
+import logging
 import shlex
 from pathlib import Path
 from typing import List, Optional, Union
 
 from .tools import KaldiTools
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class KaldiNnet3WavTranscriber:
@@ -28,44 +31,67 @@ class KaldiNnet3WavTranscriber:
         self.acoustic_scale = acoustic_scale
         self.beam = beam
 
-    async def async_transcribe(self, wav_path: Union[str, Path]) -> Optional[str]:
+    async def async_transcribe(
+        self,
+        wav_path: Union[str, Path],
+        nbest: int = 1,
+        confidence_threshold: Optional[float] = None,
+    ) -> List[str]:
         words_txt = self.graph_dir / "words.txt"
         online_conf = self.model_dir / "model" / "online" / "conf" / "online.conf"
-        stdout = await self.tools.async_run(
-            "online2-wav-nnet3-latgen-faster",
+        stdout = await self.tools.async_run_pipeline(
             [
+                "online2-wav-nnet3-latgen-faster",
                 "--online=false",
                 "--do-endpointing=false",
                 f"--word-symbol-table={words_txt}",
                 f"--config={online_conf}",
                 f"--max-active={self.max_active}",
                 f"--lattice-beam={self.lattice_beam}",
-                f"--acoustic-scale={self.acoustic_scale}",
+                "--acoustic-scale=1.0",
                 f"--beam={self.beam}",
                 str(self.model_dir / "model" / "model" / "final.mdl"),
                 str(self.graph_dir / "HCLG.fst"),
-                "ark:echo utt1 utt1|",
-                f"scp:echo utt1 {wav_path}|",
-                "ark:/dev/null",
+                "ark:echo utt utt|",
+                f"scp:echo utt {wav_path}|",
+                "ark:-",
+            ],
+            [
+                "lattice-to-nbest",
+                f"--n={nbest}",
+                f"--acoustic-scale={self.acoustic_scale}",
+                "ark:-",
+                "ark:-",
+            ],
+            [
+                "nbest-to-linear",
+                "ark:-",
+                "ark:/dev/null",  # alignments
+                "ark,t:-",  # transcriptions
+            ],
+            [
+                str(self.tools.egs_utils_dir / "int2sym.pl"),
+                "-f",
+                "2-",
+                str(words_txt),
             ],
             stderr=asyncio.subprocess.STDOUT,
         )
 
-        lines = stdout.decode(encoding="utf-8").splitlines()
-        for line in lines:
-            if line.startswith("utt1 "):
+        texts: List[str] = []
+        for line in stdout.decode().splitlines():
+            if line.startswith("utt-"):
                 parts = line.strip().split(maxsplit=1)
                 if len(parts) > 1:
-                    return parts[1]
+                    texts.append(parts[1])
 
-        return None
+        return texts
 
     async def async_transcribe_rescore(
         self,
         wav_path: Union[str, Path],
         old_lang_dir: Union[str, Path],
         new_lang_dir: Union[str, Path],
-        rescore_acoustic_scale: float = 0.5,
         nbest: int = 1,
     ) -> List[str]:
         old_lang_dir = Path(old_lang_dir)
@@ -109,12 +135,12 @@ class KaldiNnet3WavTranscriber:
                 f"--config={online_conf}",
                 f"--max-active={self.max_active}",
                 f"--lattice-beam={self.lattice_beam}",
-                f"--acoustic-scale={self.acoustic_scale}",
+                "--acoustic-scale=1.0",
                 f"--beam={self.beam}",
                 str(model_file),
                 str(self.graph_dir / "HCLG.fst"),
-                "ark:echo utt1 utt1|",
-                f"scp:echo utt1 {wav_path}|",
+                "ark:echo utt utt|",
+                f"scp:echo utt {wav_path}|",
                 "ark:-",
             ],
             ["lattice-scale", "--lm-scale=0.0", "ark:-", "ark:-"],
@@ -144,7 +170,7 @@ class KaldiNnet3WavTranscriber:
             [
                 "lattice-to-nbest",
                 f"--n={nbest}",
-                f"--acoustic-scale={rescore_acoustic_scale}",
+                f"--acoustic-scale={self.acoustic_scale}",
                 "ark:-",
                 "ark:-",
             ],
@@ -165,7 +191,7 @@ class KaldiNnet3WavTranscriber:
 
         texts: List[str] = []
         for line in stdout.decode().splitlines():
-            if line.startswith("utt1-"):
+            if line.startswith("utt-"):
                 parts = line.strip().split(maxsplit=1)
                 if len(parts) > 1:
                     texts.append(parts[1])

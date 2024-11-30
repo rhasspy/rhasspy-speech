@@ -3,7 +3,7 @@
 import io
 import json
 import os
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
@@ -11,7 +11,7 @@ from hassil.util import merge_dict
 from unicode_rbnf import RbnfEngine
 from yaml import safe_load
 
-from .const import WordCasing
+from .const import LangSuffix, WordCasing
 from .g2p import LexiconDatabase, get_sounds_like
 from .intent_fst import intents_to_fst
 from .kaldi import KaldiTrainer
@@ -24,6 +24,7 @@ async def train_model(
     train_dir: Union[str, Path],
     model_dir: Union[str, Path],
     tools: KaldiTools,
+    lang_suffixes: Optional[Collection[LangSuffix]] = None,
     rescore_order: Optional[int] = None,
 ):
     """Train a model on YAML sentences."""
@@ -62,7 +63,7 @@ async def train_model(
             word_casing=word_casing,
         )
 
-        trainer_args: Dict[str, Any] = {}  # {"rescore_order": rescore_order}
+        trainer_args: Dict[str, Any] = {}
         if "spn_phone" in model_config:
             trainer_args["spn_phone"] = model_config["spn_phone"]
 
@@ -74,4 +75,8 @@ async def train_model(
             **trainer_args,
         )
 
-        await trainer.train(rescore_order=rescore_order)
+        train_args: Dict[str, Any] = {}
+        if rescore_order is not None:
+            train_args["rescore_order"] = rescore_order
+
+        await trainer.train(lang_suffixes=lang_suffixes, **train_args)

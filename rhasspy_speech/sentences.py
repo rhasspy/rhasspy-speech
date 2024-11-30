@@ -170,7 +170,12 @@ def generate_sentences(
                     requires_context=requires_context,
                     excludes_context=excludes_context,
                 ):
-                    final_output_text = output_text or maybe_output_text or input_text
+                    if output_text is None:
+                        final_output_text = maybe_output_text or input_text
+                    else:
+                        # May be empty
+                        final_output_text = output_text
+
                     if list_values:
                         # Replace {lists} with values
                         final_output_text = final_output_text.format(**list_values)
@@ -179,7 +184,13 @@ def generate_sentences(
                     num_sentences += 1
             else:
                 # Not a template
-                yield (input_template, output_text or input_template)
+                if output_text is None:
+                    final_output_text = input_template
+                else:
+                    # May be empty
+                    final_output_text = output_text
+
+                yield (input_template, final_output_text)
                 num_sentences += 1
 
     end_time = time.monotonic()
