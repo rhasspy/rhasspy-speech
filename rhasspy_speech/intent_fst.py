@@ -163,16 +163,42 @@ def intents_to_fst(
 def get_matching_scores(
     texts: List[str],
     sentences_db_path: Union[str, Path],
+    norm_distance_threshold: Optional[float] = None,
     weights: Tuple[int, int, int] = (1, 1, 3),
-) -> Tuple[str, float]:
+) -> Optional[Tuple[str, float]]:
+    best_text = None
+    best_score = None
+
     with sqlite3.connect(str(sentences_db_path)) as db_conn:
-        cursor = db_conn.execute("SELECT input, output from sentences")
-        result = extractOne(
-            texts,
-            cursor,
-            processor=lambda s: s[0],
-            scorer=Levenshtein.distance,
-            scorer_kwargs={"weights": (1, 1, 3)},
-        )
-        fixed_row, score = result[0], result[1]
-        return (fixed_row[1], score)
+        for text in texts:
+            score_cutoff: Optional[float] = 0
+            if norm_distance_threshold is not None:
+                score_cutoff = int(len(text) * norm_distance_threshold)
+
+            cursor = db_conn.execute("SELECT input, output from sentences")
+            result = extractOne(
+                [text],
+                cursor,
+                processor=lambda s: s[0],
+                scorer=Levenshtein.distance,
+                score_cutoff=score_cutoff,
+                scorer_kwargs={"weights": weights},
+            )
+
+            if result is None:
+                # Didn't make the score cutoff
+                continue
+
+            fixed_row, score = result[0], result[1]
+            if score == 0:
+                # Can't do any better
+                return (fixed_row[1], score)
+
+            if (best_score is None) or (score < best_score):
+                best_text = fixed_row[1]
+                best_score = score
+
+    if (best_text is None) or (best_score is None):
+        return None
+
+    return (best_text, best_score)
