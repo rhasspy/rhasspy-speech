@@ -139,15 +139,6 @@ def intents_to_fst(
             context.add_edge(state, final_state)
             num_sentences += 1
 
-    # unk_order = 5
-    # unk_log_prob = -3 #-math.log(num_sentences / 1000)
-    # for num_unk in range(1, unk_order + 1):
-    #     state = root_state
-    #     for _ in range(num_unk):
-    #         state = context.next_edge(state, unk, log_prob=unk_log_prob)
-
-    #     context.add_edge(state, final_state)
-
     context.accept(final_state)
     context.fst_file.seek(0)
 
