@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 from hassil.util import merge_dict
-from unicode_rbnf import RbnfEngine
 from yaml import safe_load
 
 from .const import LangSuffix, WordCasing
@@ -42,7 +41,6 @@ async def train_model(
             merge_dict(sentence_yaml, safe_load(sentence_file))
 
     lexicon = LexiconDatabase(os.path.join(model_dir, "lexicon.db"))
-    number_engine = RbnfEngine.for_language(language)
 
     # User lexicon
     words = sentence_yaml.get("words", {})
@@ -59,7 +57,7 @@ async def train_model(
             sentence_yaml=sentence_yaml,
             fst_file=fst_file,
             lexicon=lexicon,
-            number_engine=number_engine,
+            number_language=language,
             word_casing=word_casing,
         )
 

@@ -1,5 +1,6 @@
 import math
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import reduce
 from typing import Dict, List, Optional, Set, TextIO, Tuple
@@ -16,6 +17,8 @@ from hassil.expression import (
 from hassil.intents import IntentData, Intents, RangeSlotList, SlotList, TextSlotList
 from hassil.util import check_excluded_context, check_required_context
 from unicode_rbnf import RbnfEngine
+
+from .g2p import LexiconDatabase, split_words
 
 EPS = "<eps>"
 SPACE = "<space>"
@@ -90,7 +93,7 @@ class Fst:
         self.states.add(state)
         self.final_states.add(state)
 
-    def write(self, fst_file: TextIO, symbols_file: TextIO) -> None:
+    def write(self, fst_file: TextIO, symbols_file: Optional[TextIO] = None) -> None:
         symbols = {EPS: 0}
 
         for state, arcs in self.arcs.items():
@@ -118,8 +121,9 @@ class Fst:
         for state in self.final_states:
             print(state, file=fst_file)
 
-        for symbol, symbol_id in symbols.items():
-            print(symbol, symbol_id, file=symbols_file)
+        if symbols_file is not None:
+            for symbol, symbol_id in symbols.items():
+                print(symbol, symbol_id, file=symbols_file)
 
     def remove_spaces(self) -> "Fst":
         """Remove <space> tokens and merge partial word labels."""
@@ -160,10 +164,14 @@ class Fst:
             key = (state, arc.to_state, arc_idx)
             cached_state = visited.get(key)
             if cached_state is not None:
-                fst_without_spaces.add_edge(output_state, cached_state, word, word)
+                fst_without_spaces.add_edge(
+                    output_state, cached_state, word or EPS, word or EPS
+                )
                 return
 
-            output_state = fst_without_spaces.next_edge(output_state, word, word)
+            output_state = fst_without_spaces.next_edge(
+                output_state, word or EPS, word or EPS
+            )
             visited[key] = output_state
 
             if arc.to_state in self.final_states:
@@ -284,6 +292,12 @@ class NumToWords:
     cache: Dict[Tuple[int, int, int], Sequence] = field(default_factory=dict)
 
 
+@dataclass
+class G2PInfo:
+    lexicon: LexiconDatabase
+    casing_func: Callable[[str], str] = field(default=lambda s: s)
+
+
 def expression_to_fst(
     expression: Expression,
     state: int,
@@ -292,6 +306,7 @@ def expression_to_fst(
     intents: Intents,
     slot_lists: Optional[Dict[str, SlotList]] = None,
     num_to_words: Optional[NumToWords] = None,
+    g2p_info: Optional[G2PInfo] = None,
 ) -> Optional[int]:
     if isinstance(expression, TextChunk):
         chunk: TextChunk = expression
@@ -315,9 +330,20 @@ def expression_to_fst(
         if space_before:
             state = fst.next_edge(state, SPACE)
 
-        sub_words = word.split()
+        if g2p_info is not None:
+            sub_words = split_words(
+                word,
+                g2p_info.lexicon,
+                num_to_words.engine if num_to_words is not None else None,
+            )
+        else:
+            sub_words = word.split()
+
         last_sub_word_idx = len(sub_words) - 1
         for sub_word_idx, sub_word in enumerate(sub_words):
+            if g2p_info is not None:
+                sub_word = g2p_info.casing_func(sub_word)
+
             state = fst.next_edge(state, sub_word)
             if sub_word_idx != last_sub_word_idx:
                 # Add spaces between words
@@ -336,7 +362,14 @@ def expression_to_fst(
 
             for item in seq.items:
                 state = expression_to_fst(
-                    item, start, fst, intent_data, intents, slot_lists, num_to_words
+                    item,
+                    start,
+                    fst,
+                    intent_data,
+                    intents,
+                    slot_lists,
+                    num_to_words,
+                    g2p_info,
                 )
                 if state is None:
                     # Dead branch
@@ -356,7 +389,14 @@ def expression_to_fst(
         if seq.type == SequenceType.GROUP:
             for item in seq.items:
                 state = expression_to_fst(
-                    item, state, fst, intent_data, intents, slot_lists, num_to_words
+                    item,
+                    state,
+                    fst,
+                    intent_data,
+                    intents,
+                    slot_lists,
+                    num_to_words,
+                    g2p_info,
                 )
 
                 if state is None:
@@ -403,24 +443,30 @@ def expression_to_fst(
 
                 values.append(value.text_in)
 
-            if values:
-                return expression_to_fst(
-                    Sequence(values, type=SequenceType.ALTERNATIVE),
-                    state,
-                    fst,
-                    intent_data,
-                    intents,
-                    slot_lists,
-                    num_to_words,
-                )
+            if not values:
+                # Dead branch
+                return None
+
+            return expression_to_fst(
+                Sequence(values, type=SequenceType.ALTERNATIVE),
+                state,
+                fst,
+                intent_data,
+                intents,
+                slot_lists,
+                num_to_words,
+                g2p_info,
+            )
 
         elif isinstance(slot_list, RangeSlotList):
             range_list: RangeSlotList = slot_list
-            number_sequence: Optional[Sequence] = None
-            num_cache_key = (range_list.start, range_list.stop + 1, range_list.step)
 
-            if num_to_words is not None:
-                number_sequence = num_to_words.cache.get(num_cache_key)
+            if num_to_words is None:
+                # Dead branch
+                return None
+
+            num_cache_key = (range_list.start, range_list.stop + 1, range_list.step)
+            number_sequence = num_to_words.cache.get(num_cache_key)
 
             if number_sequence is None:
                 values: List[TextChunk] = []
@@ -441,6 +487,10 @@ def expression_to_fst(
                 if num_to_words is not None:
                     num_to_words.cache[num_cache_key] = number_sequence
 
+            if not values:
+                # Dead branch
+                return None
+
             return expression_to_fst(
                 number_sequence,
                 state,
@@ -449,6 +499,7 @@ def expression_to_fst(
                 intents,
                 slot_lists,
                 num_to_words,
+                g2p_info,
             )
         else:
             # Will be pruned
@@ -470,7 +521,14 @@ def expression_to_fst(
             raise ValueError(f"Missing expansion rule <{rule_ref.rule_name}>")
 
         return expression_to_fst(
-            rule_body, state, fst, intent_data, intents, slot_lists, num_to_words
+            rule_body,
+            state,
+            fst,
+            intent_data,
+            intents,
+            slot_lists,
+            num_to_words,
+            g2p_info,
         )
 
     return state
@@ -544,6 +602,7 @@ def intents_to_fst(
     number_language: Optional[str] = None,
     exclude_intents: Optional[Set[str]] = None,
     include_intents: Optional[Set[str]] = None,
+    g2p_info: Optional[G2PInfo] = None,
 ) -> Fst:
     num_to_words: Optional[NumToWords] = None
     if number_language:
@@ -574,7 +633,7 @@ def intents_to_fst(
     fst_with_spaces = Fst()
     final = fst_with_spaces.next_state()
 
-    num_sentences_lcm = lcm(*sentence_counts.values())
+    # num_sentences_lcm = lcm(*sentence_counts.values())
     # intent_weights = {
     #     intent_name: num_sentences_lcm // max(1, count)
     #     for intent_name, count in sentence_counts.items()
@@ -616,6 +675,7 @@ def intents_to_fst(
                     intents,
                     slot_lists,
                     num_to_words,
+                    g2p_info,
                 )
 
                 if state is None:

@@ -14,16 +14,16 @@ from unicode_rbnf import RbnfEngine
 _SOUNDS_LIKE_PARTIAL = re.compile(r"^([^[]*)\[([^]]+)].*$")
 _INITIALISM_NO_DOTS = re.compile(r"^(?:\p{Lu}){2,}$")
 _INITIALISM_DOTS = re.compile(r"^(?:\p{L}\.){2,}$")
-_NUMBER_SPLIT = re.compile(r"(\d+(?:\.\d+))")
+_NUMBER_SPLIT = re.compile(r"(\d+(?:\.\d+)?)")
 _NUMBER = re.compile(r"^\d+(\.\d+)?$")
 
 # -----------------------------------------------------------------------------
 
 
 class LexiconDatabase:
-    def __init__(self, db_path: Union[str, Path]) -> None:
-        self.db_path = Path(db_path)
-        self._conn = sqlite3.Connection(str(self.db_path))
+    def __init__(self, db_path: Optional[Union[str, Path]] = None) -> None:
+        self.db_path = Path(db_path) if db_path else None
+        self._conn = sqlite3.Connection(str(self.db_path)) if self.db_path else None
         self._cache: Dict[str, Optional[List[List[str]]]] = {}
 
     def add(self, word: str, pronunciations: List[List[str]]) -> None:
@@ -34,7 +34,7 @@ class LexiconDatabase:
             cached_prons.extend(pronunciations)
 
     def exists(self, word: str) -> bool:
-        if not self._cache:
+        if (not self._cache) and (self._conn is not None):
             # Load word list and add placeholders
             cur = self._conn.execute("SELECT DISTINCT word FROM word_phonemes")
             for row in cur:
@@ -53,6 +53,9 @@ class LexiconDatabase:
             cached_prons = self._cache.get(word_var)
             if cached_prons is not None:
                 return cached_prons
+
+        if self._conn is None:
+            return []
 
         db_prons: List[List[str]] = []
         for word_var in word_vars:
@@ -74,6 +77,9 @@ class LexiconDatabase:
         return db_prons
 
     def alignments(self, word: str) -> List[str]:
+        if self._conn is None:
+            return []
+
         alignments: List[str] = []
         for word_var in self._word_variations(word):
             cur = self._conn.execute(
@@ -108,7 +114,7 @@ class LexiconDatabase:
 
 
 def split_words(
-    text: str, lexicon: LexiconDatabase, number_engine: RbnfEngine
+    text: str, lexicon: LexiconDatabase, number_engine: Optional[RbnfEngine] = None
 ) -> List[str]:
     words: List[str] = []
     for word in text.split():
@@ -131,7 +137,7 @@ def split_words(
             elif _INITIALISM_DOTS.match(sub_word):
                 # A.B.C. -> A B C
                 words.extend((c for c in sub_word if c != "."))
-            elif _NUMBER.match(sub_word):
+            elif _NUMBER.match(sub_word) and (number_engine is not None):
                 # 123 -> one hundred twenty three
                 number_word_str = number_engine.format_number(sub_word).text
                 number_words = number_word_str.replace("-", " ").split()
