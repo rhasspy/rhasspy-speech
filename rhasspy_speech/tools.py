@@ -80,8 +80,10 @@ class KaldiTools:
         stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
             error_text = f"Unexpected error running command {program} {args}"
-            if stderr is not None:
+            if stderr:
                 error_text += f": {stderr.decode()}"
+            elif stdout:
+                error_text += f": {stdout.decode()}"
 
             raise RuntimeError(error_text)
 
@@ -103,8 +105,10 @@ class KaldiTools:
         stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
             error_text = f"Unexpected error running command {cmd}"
-            if stderr is not None:
+            if stderr:
                 error_text += f": {stderr.decode()}"
+            elif stdout:
+                error_text += f": {stdout.decode()}"
 
             raise RuntimeError(error_text)
 
@@ -128,8 +132,10 @@ class KaldiTools:
         stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
             error_text = f"Unexpected error running command {command_str}"
-            if stderr is not None:
+            if stderr:
                 error_text += f": {stderr.decode()}"
+            elif stdout:
+                error_text += f": {stdout.decode()}"
 
             raise RuntimeError(error_text)
 

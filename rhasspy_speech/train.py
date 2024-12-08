@@ -34,7 +34,7 @@ async def train_model(
         with open(model_config_path, "r", encoding="utf-8") as model_config_file:
             model_config = json.load(model_config_file)
 
-    word_casing = WordCasing(model_config.get("word_casing", "lower"))
+    word_casing = WordCasing(model_config.get("lexicon", {}).get("casing", "lower"))
     sentence_yaml: Dict[str, Any] = {}
 
     for sentence_path in sentence_files:
@@ -64,6 +64,9 @@ async def train_model(
         )
 
         trainer_args: Dict[str, Any] = {}
+        if "sil_phone" in model_config:
+            trainer_args["sil_phone"] = model_config["sil_phone"]
+
         if "spn_phone" in model_config:
             trainer_args["spn_phone"] = model_config["spn_phone"]
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import logging
 import sqlite3
 import gzip
 import shutil
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Dict, TextIO, Set
 
 import yaml
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def env_constructor(loader, node):
@@ -22,6 +25,9 @@ def main() -> None:
     parser.add_argument("output_dir", help="Directory to export rhasspy speech model")
     args = parser.parse_args()
 
+    logging.basicConfig(level=logging.DEBUG)
+    _LOGGER.debug(args)
+
     profile_dir = Path(args.profile_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -31,7 +37,6 @@ def main() -> None:
     g2p_corpus_path = profile_dir / "g2p.corpus.gz"
     assert g2p_corpus_path
     g2p_fst_path = profile_dir / "g2p.fst.gz"
-    assert g2p_fst_path.exists()
 
     # lexicon.db
     with sqlite3.Connection(output_dir / "lexicon.db") as db_conn:
@@ -39,9 +44,12 @@ def main() -> None:
         with gzip.open(dict_path, "rt", encoding="utf-8") as dict_file:
             export_dictionary(dict_file, db_conn)
 
-        print("Exporting alignments")
-        with gzip.open(g2p_corpus_path, "rt", encoding="utf-8") as corpus_file:
-            export_alignments(corpus_file, db_conn)
+        if g2p_corpus_path.exists():
+            print("Exporting alignments")
+            with gzip.open(g2p_corpus_path, "rt", encoding="utf-8") as corpus_file:
+                export_alignments(corpus_file, db_conn)
+        else:
+            _LOGGER.warning("No g2p corpus: %s", g2p_corpus_path)
 
     # g2p.fst
     print("Extracting phonetisaurus model")
@@ -79,6 +87,7 @@ def main() -> None:
             "language": profile_dict["language"],
             "lexicon": {"casing": profile_dict["training"]["word-casing"]},
             "g2p": {"casing": profile_dict["training"]["g2p-word-casing"]},
+            "sil_phone": profile_dict["training"].get("sil_phone", "SIL"),
             "spn_phone": profile_dict["training"].get("spn_phone", "SPN"),
         }
         json.dump(config_dict, config_file, indent=4)

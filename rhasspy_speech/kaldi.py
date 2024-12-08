@@ -156,6 +156,14 @@ class KaldiTrainer:
         for phone_file in phones_dir.glob("*.txt"):
             shutil.copy(phone_file, dict_local_dir / phone_file.name)
 
+        with open("/home/hansenm/opt/grammar-fst-test/output_words.txt", "r") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    word = line.split()[0]
+                    if "<" not in word:
+                        self.fst_context.vocab.add(word)
+
         # Create dictionary
         dictionary_path = dict_local_dir / "lexicon.txt"
         lexicon = self.fst_context.lexicon
@@ -247,39 +255,42 @@ class KaldiTrainer:
         text_fst_path = fst_path.with_suffix(".fst.txt")
         arpa_path = lang_dir / "lm.arpa"
 
-        with open(text_fst_path, "w", encoding="utf-8") as text_fst_file:
-            self.fst_context.fst_file.seek(0)
-            shutil.copyfileobj(self.fst_context.fst_file, text_fst_file)
+        # TODO:
+        shutil.copyfile("/home/hansenm/opt/grammar-fst-test/lm.arpa", arpa_path)
 
-        await self.tools.async_run(
-            "fstcompile",
-            [
-                shlex.quote(f"--isymbols={lang_dir}/words.txt"),
-                shlex.quote(f"--osymbols={lang_dir}/words.txt"),
-                "--keep_isymbols=true",
-                "--keep_osymbols=true",
-                shlex.quote(str(text_fst_path)),
-                shlex.quote(str(fst_path)),
-            ],
-        )
-        await self.tools.async_run_pipeline(
-            [
-                "ngramcount",
-                f"--order={order}",
-                shlex.quote(str(fst_path)),
-                "-",
-            ],
-            [
-                "ngrammake",
-                f"--method={method}",
-            ],
-            [
-                "ngramprint",
-                "--ARPA",
-                "-",
-                shlex.quote(str(arpa_path)),
-            ],
-        )
+        # with open(text_fst_path, "w", encoding="utf-8") as text_fst_file:
+        #     self.fst_context.fst_file.seek(0)
+        #     shutil.copyfileobj(self.fst_context.fst_file, text_fst_file)
+
+        # await self.tools.async_run(
+        #     "fstcompile",
+        #     [
+        #         shlex.quote(f"--isymbols={lang_dir}/words.txt"),
+        #         shlex.quote(f"--osymbols={lang_dir}/words.txt"),
+        #         "--keep_isymbols=true",
+        #         "--keep_osymbols=true",
+        #         shlex.quote(str(text_fst_path)),
+        #         shlex.quote(str(fst_path)),
+        #     ],
+        # )
+        # await self.tools.async_run_pipeline(
+        #     [
+        #         "ngramcount",
+        #         f"--order={order}",
+        #         shlex.quote(str(fst_path)),
+        #         "-",
+        #     ],
+        #     [
+        #         "ngrammake",
+        #         f"--method={method}",
+        #     ],
+        #     [
+        #         "ngramprint",
+        #         "--ARPA",
+        #         "-",
+        #         shlex.quote(str(arpa_path)),
+        #     ],
+        # )
 
         lang_local_dir = self.lang_local_dir(lang_type.value)
         arpa_gz_path = lang_local_dir / "lm.arpa.gz"
