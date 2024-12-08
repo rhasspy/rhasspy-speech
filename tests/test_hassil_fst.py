@@ -26,6 +26,11 @@ intents:
       - sentences:
           - "add {item} to todo"
 
+  SetBrightness:
+    data:
+      - sentences:
+          - "set brightness to {brightness} percent"
+
 lists:
   name:
     values:
@@ -33,6 +38,10 @@ lists:
       - light
   item:
     wildcard: true
+  brightness:
+    range:
+      from: 20
+      to: 22
 """
 
 
@@ -41,6 +50,8 @@ def test_text_only() -> None:
         intents = Intents.from_yaml(intents_file)
 
     fst = intents_to_fst(intents, include_intents={"GetTime"})
+    assert fst.words == {SPACE, "what", "time", "is", "it", "the"}
+
     assert set(tuple(t) for t in fst.to_tokens()) == {
         ("what", SPACE, "time", SPACE, "is", SPACE, "it"),
         ("what", SPACE, "is", SPACE, "the", SPACE, "time"),
@@ -48,6 +59,7 @@ def test_text_only() -> None:
     assert set(fst.to_strings(False)) == {"what time is it", "what is the time"}
 
     fst_without_spaces = fst.remove_spaces()
+    assert fst_without_spaces.words == {"what", "time", "is", "it", "the"}
     assert set(tuple(t) for t in fst_without_spaces.to_tokens()) == {
         ("what", "time", "is", "it"),
         ("what", "is", "the", "time"),
@@ -74,6 +86,15 @@ def test_lists() -> None:
     assert set(fst.to_strings(True)) == {
         "what is the tv's state",
         "what is the light's state",
+    }
+
+    fst = intents_to_fst(
+        intents, number_language="en", include_intents={"SetBrightness"}
+    ).remove_spaces()
+    assert set(fst.to_strings(True)) == {
+        "set brightness to twenty percent",
+        "set brightness to twenty one percent",
+        "set brightness to twenty two percent",
     }
 
 

@@ -34,6 +34,7 @@ class Fst:
     arcs: Dict[int, List[FstArc]] = field(default_factory=lambda: defaultdict(list))
     states: Set[int] = field(default_factory=lambda: {0})
     final_states: Set[int] = field(default_factory=set)
+    words: Set[str] = field(default_factory=set)
     start: int = 0
     current_state: int = 0
 
@@ -74,6 +75,12 @@ class Fst:
 
         if (not in_label) or (not out_label):
             raise ValueError(f"Labels cannot be empty: from={in_label}, to={out_label}")
+
+        if in_label != EPS:
+            self.words.add(in_label)
+
+        if out_label != EPS:
+            self.words.add(out_label)
 
         self.states.add(from_state)
         self.states.add(to_state)
