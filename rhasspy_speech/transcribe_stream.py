@@ -9,8 +9,7 @@ from collections.abc import AsyncIterable
 from pathlib import Path
 from typing import List, Optional, Union
 
-from .const import EPS
-from .hassil_fst import Fst, decode_meta
+from .hassil_fst import decode_meta
 from .tools import KaldiTools
 from .transcribe_util import get_fuzzy_text
 
@@ -261,6 +260,6 @@ class KaldiNnet3StreamTranscriber:
                 if line.startswith("utt-"):
                     parts = line.strip().split(maxsplit=1)
                     if len(parts) > 1:
-                        texts.append(parts[1])
+                        texts.append(decode_meta(parts[1]))
 
             return texts

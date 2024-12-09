@@ -393,6 +393,7 @@ class KaldiTrainer:
                 shlex.quote(str(text_fst_path)),
                 "-",
             ],
+            ["fstproject", "--project_type=input"],  # needed for determinization
             ["fstdeterminize"],
             ["fstminimize"],
             [
