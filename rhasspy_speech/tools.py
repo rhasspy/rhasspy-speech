@@ -114,12 +114,17 @@ class KaldiTools:
 
         return stdout
 
-    async def async_run_pipeline(self, *commands: List[str], **kwargs) -> bytes:
+    async def async_run_pipeline(
+        self, *commands: List[str], input: Optional[bytes] = None, **kwargs
+    ) -> bytes:
         if "env" not in kwargs:
             kwargs["env"] = self.extended_env
 
         if "stderr" not in kwargs:
             kwargs["stderr"] = asyncio.subprocess.PIPE
+
+        if input is not None:
+            kwargs["stdin"] = asyncio.subprocess.PIPE
 
         command_str = " | ".join((shlex.join(c) for c in commands))
         _LOGGER.debug(command_str)
@@ -129,7 +134,7 @@ class KaldiTools:
             stdout=asyncio.subprocess.PIPE,
             **kwargs,
         )
-        stdout, stderr = await proc.communicate()
+        stdout, stderr = await proc.communicate(input=input)
         if proc.returncode != 0:
             error_text = f"Unexpected error running command {command_str}"
             if stderr:

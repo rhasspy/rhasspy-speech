@@ -1,4 +1,6 @@
+import base64
 import math
+import re
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -22,6 +24,8 @@ from .g2p import LexiconDatabase, split_words
 
 EPS = "<eps>"
 SPACE = "<space>"
+OUTPUT_PREFIX = "__output:"
+END_OUTPUT = "__end_output"
 
 
 @dataclass
@@ -38,6 +42,7 @@ class Fst:
     states: Set[int] = field(default_factory=lambda: {0})
     final_states: Set[int] = field(default_factory=set)
     words: Set[str] = field(default_factory=set)
+    output_words: Set[str] = field(default_factory=set)
     start: int = 0
     current_state: int = 0
 
@@ -83,7 +88,7 @@ class Fst:
             self.words.add(in_label)
 
         if out_label != EPS:
-            self.words.add(out_label)
+            self.output_words.add(out_label)
 
         self.states.add(from_state)
         self.states.add(to_state)
@@ -142,6 +147,7 @@ class Fst:
                     next_arc,
                     next_arc_idx,
                     "",
+                    None,
                     visited,
                     fst_without_spaces,
                     output_state,
@@ -155,22 +161,22 @@ class Fst:
         arc: FstArc,
         arc_idx: int,
         word: str,
+        output_word: Optional[str],
         visited: Dict[Tuple[int, int, int], int],
         fst_without_spaces: "Fst",
         output_state: int,
     ) -> None:
-
         if arc.in_label == SPACE:
             key = (state, arc.to_state, arc_idx)
             cached_state = visited.get(key)
             if cached_state is not None:
                 fst_without_spaces.add_edge(
-                    output_state, cached_state, word or EPS, word or EPS
+                    output_state, cached_state, word or EPS, output_word or word or EPS
                 )
                 return
 
             output_state = fst_without_spaces.next_edge(
-                output_state, word or EPS, word or EPS
+                output_state, word or EPS, output_word or word or EPS
             )
             visited[key] = output_state
 
@@ -178,6 +184,16 @@ class Fst:
                 fst_without_spaces.final_states.add(output_state)
 
             word = ""
+
+            if output_word == EPS:
+                # Back to regular output
+                output_word = None
+        elif arc.out_label.startswith(OUTPUT_PREFIX):
+            # Output word
+            output_word = arc.out_label
+        elif arc.out_label == END_OUTPUT:
+            # End output after next space
+            output_word = EPS
         elif arc.in_label != EPS:
             word += arc.in_label
 
@@ -187,6 +203,7 @@ class Fst:
                 next_arc,
                 next_arc_idx,
                 word,
+                output_word,
                 visited,
                 fst_without_spaces,
                 output_state,
@@ -298,6 +315,11 @@ class G2PInfo:
     casing_func: Callable[[str], str] = field(default=lambda s: s)
 
 
+@dataclass
+class TextChunkWithOutput(TextChunk):
+    output_text: Optional[str] = None
+
+
 def expression_to_fst(
     expression: Expression,
     state: int,
@@ -339,15 +361,35 @@ def expression_to_fst(
         else:
             sub_words = word.split()
 
+        has_different_output = False
+        if isinstance(chunk, TextChunkWithOutput):
+            chunk_with_output: TextChunkWithOutput = chunk
+            if (chunk_with_output.output_text is not None) and (
+                chunk_with_output.output_text != word
+            ):
+                has_different_output = True
+                output_word = OUTPUT_PREFIX + (
+                    base64.b32encode(chunk_with_output.output_text.encode("utf-8"))
+                    .strip()
+                    .decode("utf-8")
+                )
+                state = fst.next_edge(state, EPS, output_word)
+
         last_sub_word_idx = len(sub_words) - 1
         for sub_word_idx, sub_word in enumerate(sub_words):
             if g2p_info is not None:
                 sub_word = g2p_info.casing_func(sub_word)
 
-            state = fst.next_edge(state, sub_word)
+            state = fst.next_edge(
+                state, sub_word, EPS if has_different_output else sub_word
+            )
             if sub_word_idx != last_sub_word_idx:
                 # Add spaces between words
                 state = fst.next_edge(state, SPACE)
+
+        if has_different_output:
+            # Mark end of different output
+            state = fst.next_edge(state, EPS, END_OUTPUT)
 
         if space_after:
             state = fst.next_edge(state, SPACE)
@@ -475,12 +517,18 @@ def expression_to_fst(
                     for number in range(
                         range_list.start, range_list.stop + 1, range_list.step
                     ):
+                        number_str = str(number)
                         number_result = num_to_words.engine.format_number(number)
                         number_words = {
                             w.replace("-", " ")
                             for w in number_result.text_by_ruleset.values()
                         }
-                        values.extend((TextChunk(w) for w in number_words))
+                        values.extend(
+                            (
+                                TextChunkWithOutput(w, output_text=number_str)
+                                for w in number_words
+                            )
+                        )
 
                 number_sequence = Sequence(values, type=SequenceType.ALTERNATIVE)
 
@@ -687,3 +735,11 @@ def intents_to_fst(
     fst_with_spaces.accept(final)
 
     return fst_with_spaces
+
+
+def decode_meta(text: str) -> str:
+    return re.sub(
+        re.escape(OUTPUT_PREFIX) + "([0-9A-Z=]+)",
+        lambda m: base64.b32decode(m.group(1).encode("utf-8")).decode("utf-8"),
+        text,
+    )

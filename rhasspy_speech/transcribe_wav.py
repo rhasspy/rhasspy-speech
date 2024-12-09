@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional, Union
 
+from .hassil_fst import decode_meta
 from .tools import KaldiTools
 
 _LOGGER = logging.getLogger(__name__)
@@ -84,7 +85,7 @@ class KaldiNnet3WavTranscriber:
             if line.startswith("utt-"):
                 parts = line.strip().split(maxsplit=1)
                 if len(parts) > 1:
-                    texts.append(parts[1])
+                    texts.append(decode_meta(parts[1]))
 
         return texts
 

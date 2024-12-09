@@ -21,6 +21,7 @@ class IntentsToFstContext:
     fst_file: TextIO
     lexicon: LexiconDatabase
     vocab: Set[str] = field(default_factory=set)
+    meta_labels: Set[str] = field(default_factory=set)
     word_casing: WordCasing = WordCasing.LOWER
 
 
@@ -46,5 +47,6 @@ def intents_to_fst(
     fst.write(context.fst_file)
     context.fst_file.seek(0)
     context.vocab = fst.words
+    context.meta_labels = fst.output_words - fst.words
 
     return context

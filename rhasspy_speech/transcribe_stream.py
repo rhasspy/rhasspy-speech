@@ -2,12 +2,15 @@
 
 import asyncio
 import logging
+import io
 import shlex
 import tempfile
 from collections.abc import AsyncIterable
 from pathlib import Path
 from typing import List, Optional, Union
 
+from .const import EPS
+from .hassil_fst import decode_meta, Fst
 from .tools import KaldiTools
 
 _LOGGER = logging.getLogger(__name__)
@@ -104,7 +107,7 @@ class KaldiNnet3StreamTranscriber:
                 if line.startswith("utt-"):
                     parts = line.strip().split(maxsplit=1)
                     if len(parts) > 1:
-                        texts.append(parts[1])
+                        texts.append(decode_meta(parts[1]))
 
             return texts
 
@@ -218,14 +221,60 @@ class KaldiNnet3StreamTranscriber:
                     "ark:/dev/null",  # alignments
                     "ark,t:-",  # transcriptions
                 ],
-                [
-                    str(self.tools.egs_utils_dir / "int2sym.pl"),
-                    "-f",
-                    "2-",
-                    str(new_lang_dir / "words.txt"),
-                ],
-                stderr=asyncio.subprocess.STDOUT,
             )
+
+            input_fst = Fst()
+            with io.StringIO(stdout.decode(encoding="utf-8")) as nbest_file:
+                for line in nbest_file:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    _LOGGER.error(line)
+
+                    # Strip utt-*
+                    path = line.split()[1:]
+                    state = input_fst.start
+                    for symbol in path:
+                        state = input_fst.next_edge(state, symbol, symbol)
+
+                    input_fst.final_states.add(state)
+
+            with io.StringIO() as input_fst_file:
+                input_fst.write(input_fst_file)
+                input_fst_file.seek(0)
+
+                stdout = await self.tools.async_run_pipeline(
+                    ["fstcompile"],
+                    [
+                        "fstcompose",
+                        "-",
+                        shlex.quote(str(old_lang_dir / "G.arpa_fuzzy.fst")),
+                    ],
+                    ["fstshortestpath"],
+                    ["fstrmepsilon"],
+                    ["fsttopsort"],
+                    ["fstproject", "--project_type=output"],
+                    ["fstprint", f"--osymbols={words_txt}"],
+                    ["awk", "{print $3}"],
+                    input=input_fst_file.getvalue().encode("utf-8"),
+                )
+
+                text = " ".join(
+                    word
+                    for word in stdout.decode("utf-8").splitlines(keepends=False)
+                    if word != EPS
+                ).strip()
+                return [decode_meta(text)]
+
+            #     [
+            #         str(self.tools.egs_utils_dir / "int2sym.pl"),
+            #         "-f",
+            #         "2-",
+            #         str(new_lang_dir / "words.txt"),
+            #     ],
+            #     stderr=asyncio.subprocess.STDOUT,
+            # )
 
             texts: List[str] = []
             for line in stdout.decode().splitlines():
