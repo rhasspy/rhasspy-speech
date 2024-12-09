@@ -26,6 +26,7 @@ EPS = "<eps>"
 SPACE = "<space>"
 BEGIN_OUTPUT = "__begin_output"
 OUTPUT_PREFIX = "__output:"
+WORD_PENALTY = 0.01
 
 
 @dataclass
@@ -171,12 +172,19 @@ class Fst:
             cached_state = visited.get(key)
             if cached_state is not None:
                 fst_without_spaces.add_edge(
-                    output_state, cached_state, word or EPS, output_word or word or EPS
+                    output_state,
+                    cached_state,
+                    word or EPS,
+                    output_word or word or EPS,
+                    log_prob=WORD_PENALTY,
                 )
                 return
 
             output_state = fst_without_spaces.next_edge(
-                output_state, word or EPS, output_word or word or EPS
+                output_state,
+                word or EPS,
+                output_word or word or EPS,
+                log_prob=WORD_PENALTY,
             )
             visited[key] = output_state
 
@@ -559,9 +567,9 @@ def expression_to_fst(
                 if num_to_words is not None:
                     num_to_words.cache[num_cache_key] = number_sequence
 
-            if not values:
-                # Dead branch
-                return None
+                if not values:
+                    # Dead branch
+                    return None
 
             return expression_to_fst(
                 number_sequence,

@@ -12,6 +12,7 @@ from typing import List, Optional, Union
 from .const import EPS
 from .hassil_fst import Fst, decode_meta
 from .tools import KaldiTools
+from .transcribe_util import get_fuzzy_text
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,8 +40,11 @@ class KaldiNnet3StreamTranscriber:
     async def async_transcribe(
         self,
         audio_stream: AsyncIterable[Optional[bytes]],
+        lang_dir: Union[str, Path],
         nbest: int = 1,
+        max_fuzzy_cost: Optional[float] = None,
     ) -> List[str]:
+        lang_dir = Path(lang_dir)
         model_file = self.model_dir / "model" / "model" / "final.mdl"
         words_txt = self.graph_dir / "words.txt"
         online_conf = self.model_dir / "model" / "online" / "conf" / "online.conf"
@@ -79,7 +83,7 @@ class KaldiNnet3StreamTranscriber:
             await proc.communicate()
 
             # Transcripts
-            stdout = await self.tools.async_run_pipeline(
+            nbest_stdout = await self.tools.async_run_pipeline(
                 [
                     "lattice-to-nbest",
                     f"--n={nbest}",
@@ -93,13 +97,23 @@ class KaldiNnet3StreamTranscriber:
                     "ark:/dev/null",  # alignments
                     "ark,t:-",  # transcriptions
                 ],
+            )
+
+            fuzzy_result = await get_fuzzy_text(nbest_stdout, lang_dir, self.tools)
+            if fuzzy_result is not None:
+                text, cost = fuzzy_result
+                _LOGGER.debug("Fuzzy cost: %s", cost)
+                if cost <= max_fuzzy_cost:
+                    return [decode_meta(text)]
+
+            stdout = await self.tools.async_run_pipeline(
                 [
                     str(self.tools.egs_utils_dir / "int2sym.pl"),
                     "-f",
                     "2-",
                     str(words_txt),
                 ],
-                stderr=asyncio.subprocess.STDOUT,
+                input=nbest_stdout,
             )
 
             texts: List[str] = []
@@ -117,6 +131,7 @@ class KaldiNnet3StreamTranscriber:
         old_lang_dir: Union[str, Path],
         new_lang_dir: Union[str, Path],
         nbest: int = 1,
+        max_fuzzy_cost: Optional[float] = None,
     ) -> List[str]:
         old_lang_dir = Path(old_lang_dir)
         new_lang_dir = Path(new_lang_dir)
@@ -183,7 +198,7 @@ class KaldiNnet3StreamTranscriber:
             proc.stdin.write_eof()
             await proc.communicate()
 
-            stdout = await self.tools.async_run_pipeline(
+            nbest_stdout = await self.tools.async_run_pipeline(
                 ["lattice-scale", "--lm-scale=0.0", f"ark:{lattice_path}", "ark:-"],
                 ["lattice-to-phone-lattice", str(model_file), "ark:-", "ark:-"],
                 [
@@ -223,56 +238,23 @@ class KaldiNnet3StreamTranscriber:
                 ],
             )
 
-            input_fst = Fst()
-            with io.StringIO(stdout.decode(encoding="utf-8")) as nbest_file:
-                for line in nbest_file:
-                    line = line.strip()
-                    if not line:
-                        continue
+            fuzzy_result = await get_fuzzy_text(nbest_stdout, old_lang_dir, self.tools)
+            if fuzzy_result is not None:
+                text, cost = fuzzy_result
+                _LOGGER.debug("Fuzzy cost: %s", cost)
+                if cost <= max_fuzzy_cost:
+                    return [decode_meta(text)]
 
-                    # Strip utt-*
-                    path = line.split()[1:]
-                    state = input_fst.start
-                    for symbol in path:
-                        state = input_fst.next_edge(state, symbol, symbol)
-
-                    input_fst.final_states.add(state)
-
-            with io.StringIO() as input_fst_file:
-                input_fst.write(input_fst_file)
-                input_fst_file.seek(0)
-
-                stdout = await self.tools.async_run_pipeline(
-                    ["fstcompile"],
-                    [
-                        "fstcompose",
-                        "-",
-                        shlex.quote(str(old_lang_dir / "G.arpa_fuzzy.fst")),
-                    ],
-                    ["fstshortestpath"],
-                    ["fstrmepsilon"],
-                    ["fsttopsort"],
-                    ["fstproject", "--project_type=output"],
-                    ["fstprint", f"--osymbols={words_txt}"],
-                    ["awk", "{print $3}"],
-                    input=input_fst_file.getvalue().encode("utf-8"),
-                )
-
-                text = " ".join(
-                    word
-                    for word in stdout.decode("utf-8").splitlines(keepends=False)
-                    if word != EPS
-                ).strip()
-                return [decode_meta(text)]
-
-            #     [
-            #         str(self.tools.egs_utils_dir / "int2sym.pl"),
-            #         "-f",
-            #         "2-",
-            #         str(new_lang_dir / "words.txt"),
-            #     ],
-            #     stderr=asyncio.subprocess.STDOUT,
-            # )
+            # Gather nbest transcriptions
+            stdout = await self.tools.async_run_pipeline(
+                [
+                    str(self.tools.egs_utils_dir / "int2sym.pl"),
+                    "-f",
+                    "2-",
+                    str(new_lang_dir / "words.txt"),
+                ],
+                input=nbest_stdout,
+            )
 
             texts: List[str] = []
             for line in stdout.decode().splitlines():

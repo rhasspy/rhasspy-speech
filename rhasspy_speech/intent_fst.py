@@ -43,6 +43,7 @@ def intents_to_fst(
     fst = hassil_intents_to_fst(
         intents, number_language=number_language, g2p_info=G2PInfo(lexicon, casing_func)
     ).remove_spaces()
+    fst.prune()
 
     fst.write(context.fst_file)
     context.fst_file.seek(0)
