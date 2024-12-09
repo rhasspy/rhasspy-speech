@@ -1,8 +1,8 @@
 """Transcribe audio stream."""
 
 import asyncio
-import logging
 import io
+import logging
 import shlex
 import tempfile
 from collections.abc import AsyncIterable
@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from .const import EPS
-from .hassil_fst import decode_meta, Fst
+from .hassil_fst import Fst, decode_meta
 from .tools import KaldiTools
 
 _LOGGER = logging.getLogger(__name__)
@@ -229,8 +229,6 @@ class KaldiNnet3StreamTranscriber:
                     line = line.strip()
                     if not line:
                         continue
-
-                    _LOGGER.error(line)
 
                     # Strip utt-*
                     path = line.split()[1:]

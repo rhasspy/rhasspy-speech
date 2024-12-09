@@ -5,7 +5,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import reduce
-from typing import Dict, List, Optional, Set, TextIO, Tuple
+from typing import Dict, List, Optional, Set, TextIO, Tuple, Union
 
 from hassil.expression import (
     Expression,
@@ -24,8 +24,8 @@ from .g2p import LexiconDatabase, split_words
 
 EPS = "<eps>"
 SPACE = "<space>"
+BEGIN_OUTPUT = "__begin_output"
 OUTPUT_PREFIX = "__output:"
-END_OUTPUT = "__end_output"
 
 
 @dataclass
@@ -185,15 +185,15 @@ class Fst:
 
             word = ""
 
-            if output_word == EPS:
-                # Back to regular output
+            if output_word != EPS:
+                # Clear output
                 output_word = None
-        elif arc.out_label.startswith(OUTPUT_PREFIX):
-            # Output word
-            output_word = arc.out_label
-        elif arc.out_label == END_OUTPUT:
-            # End output after next space
+        elif arc.out_label.startswith(BEGIN_OUTPUT):
+            # Start suppressing output
             output_word = EPS
+        elif arc.out_label.startswith(OUTPUT_PREFIX):
+            # Output on next space
+            output_word = arc.out_label
         elif arc.in_label != EPS:
             word += arc.in_label
 
@@ -316,12 +316,13 @@ class G2PInfo:
 
 
 @dataclass
-class TextChunkWithOutput(TextChunk):
-    output_text: Optional[str] = None
+class ExpressionWithOutput:
+    expression: Expression
+    output_text: str
 
 
 def expression_to_fst(
-    expression: Expression,
+    expression: Union[Expression, ExpressionWithOutput],
     state: int,
     fst: Fst,
     intent_data: IntentData,
@@ -329,7 +330,34 @@ def expression_to_fst(
     slot_lists: Optional[Dict[str, SlotList]] = None,
     num_to_words: Optional[NumToWords] = None,
     g2p_info: Optional[G2PInfo] = None,
+    suppress_output: bool = False,
 ) -> Optional[int]:
+    if isinstance(expression, ExpressionWithOutput):
+        exp_output: ExpressionWithOutput = expression
+
+        output_word = OUTPUT_PREFIX + (
+            base64.b32encode(exp_output.output_text.encode("utf-8"))
+            .strip()
+            .decode("utf-8")
+        )
+        state = fst.next_edge(state, EPS, BEGIN_OUTPUT)
+        state = expression_to_fst(
+            exp_output.expression,
+            state,
+            fst,
+            intent_data,
+            intents,
+            slot_lists,
+            num_to_words,
+            g2p_info,
+            suppress_output=True,
+        )
+        if state is None:
+            # Dead branch
+            return None
+
+        return fst.next_edge(state, EPS, output_word)
+
     if isinstance(expression, TextChunk):
         chunk: TextChunk = expression
 
@@ -361,35 +389,15 @@ def expression_to_fst(
         else:
             sub_words = word.split()
 
-        has_different_output = False
-        if isinstance(chunk, TextChunkWithOutput):
-            chunk_with_output: TextChunkWithOutput = chunk
-            if (chunk_with_output.output_text is not None) and (
-                chunk_with_output.output_text != word
-            ):
-                has_different_output = True
-                output_word = OUTPUT_PREFIX + (
-                    base64.b32encode(chunk_with_output.output_text.encode("utf-8"))
-                    .strip()
-                    .decode("utf-8")
-                )
-                state = fst.next_edge(state, EPS, output_word)
-
         last_sub_word_idx = len(sub_words) - 1
         for sub_word_idx, sub_word in enumerate(sub_words):
             if g2p_info is not None:
                 sub_word = g2p_info.casing_func(sub_word)
 
-            state = fst.next_edge(
-                state, sub_word, EPS if has_different_output else sub_word
-            )
+            state = fst.next_edge(state, sub_word, EPS if suppress_output else sub_word)
             if sub_word_idx != last_sub_word_idx:
                 # Add spaces between words
                 state = fst.next_edge(state, SPACE)
-
-        if has_different_output:
-            # Mark end of different output
-            state = fst.next_edge(state, EPS, END_OUTPUT)
 
         if space_after:
             state = fst.next_edge(state, SPACE)
@@ -483,7 +491,21 @@ def expression_to_fst(
                 ):
                     continue
 
-                values.append(value.text_in)
+                value_output_text: Optional[str] = None
+                if isinstance(value.text_in, TextChunk):
+                    value_chunk: TextChunk = value.text_in
+                    value_output_text = value_chunk.text
+                elif value.value_out is not None:
+                    value_output_text = str(value.value_out)
+
+                if value_output_text:
+                    values.append(
+                        ExpressionWithOutput(
+                            value.text_in, output_text=value_output_text
+                        )
+                    )
+                else:
+                    values.append(value.text_in)
 
             if not values:
                 # Dead branch
@@ -511,7 +533,7 @@ def expression_to_fst(
             number_sequence = num_to_words.cache.get(num_cache_key)
 
             if number_sequence is None:
-                values: List[TextChunk] = []
+                values: List[ExpressionWithOutput] = []
 
                 if num_to_words is not None:
                     for number in range(
@@ -525,7 +547,9 @@ def expression_to_fst(
                         }
                         values.extend(
                             (
-                                TextChunkWithOutput(w, output_text=number_str)
+                                ExpressionWithOutput(
+                                    TextChunk(w), output_text=number_str
+                                )
                                 for w in number_words
                             )
                         )

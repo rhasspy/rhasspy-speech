@@ -5,7 +5,7 @@ import shutil
 import tempfile
 from collections.abc import Collection
 from pathlib import Path
-from typing import Optional, Union, Set
+from typing import Optional, Set, Union
 
 from .const import EPS, SIL, SPN, UNK, LangSuffix
 from .intent_fst import IntentsToFstContext
