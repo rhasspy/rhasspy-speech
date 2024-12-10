@@ -1,7 +1,6 @@
 """Transcribe audio stream."""
 
 import asyncio
-import io
 import logging
 import shlex
 import tempfile

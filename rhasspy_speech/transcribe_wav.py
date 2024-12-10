@@ -1,9 +1,7 @@
 """Transcribe WAV files."""
 
-import asyncio
 import logging
 import shlex
-import tempfile
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -80,7 +78,7 @@ class KaldiNnet3WavTranscriber:
                 str(self.tools.egs_utils_dir / "int2sym.pl"),
                 "-f",
                 "2-",
-                str(new_lang_dir / "words.txt"),
+                str(words_txt),
             ],
             input=nbest_stdout,
         )

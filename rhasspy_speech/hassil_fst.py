@@ -3,7 +3,6 @@ import math
 import re
 from collections import defaultdict
 from collections.abc import Callable
-from collections.abc import Sequence as ABCSequence
 from dataclasses import dataclass, field
 from functools import reduce
 from typing import Dict, List, Optional, Set, TextIO, Tuple, Union

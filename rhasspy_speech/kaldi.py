@@ -378,9 +378,7 @@ class KaldiTrainer:
             # Create self loops
             for state in states:
                 # No penalty for <eps>
-                print(
-                    state, state, self.eps, self.eps, 0.0, file=text_fuzzy_fst_file
-                )
+                print(state, state, self.eps, self.eps, 0.0, file=text_fuzzy_fst_file)
 
                 for word in self.fst_context.vocab:
                     if word[0] in ("<", "_"):
@@ -388,9 +386,7 @@ class KaldiTrainer:
                         continue
 
                     # Penalty for word removal
-                    print(
-                        state, state, word, self.eps, 1.0, file=text_fuzzy_fst_file
-                    )
+                    print(state, state, word, self.eps, 1.0, file=text_fuzzy_fst_file)
 
         await self.tools.async_run_pipeline(
             [
