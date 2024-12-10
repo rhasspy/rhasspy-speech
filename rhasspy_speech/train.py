@@ -3,9 +3,9 @@
 import io
 import json
 import os
-from collections.abc import Collection, Iterable
+from collections.abc import Collection
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union, List
 
 from hassil.intents import Intents
 
@@ -22,6 +22,7 @@ async def train_model(
     train_dir: Union[str, Path],
     model_dir: Union[str, Path],
     tools: KaldiTools,
+    words: Optional[Dict[str, Union[str, List[str]]]] = None,
     lang_suffixes: Optional[Collection[LangSuffix]] = None,
     rescore_order: Optional[int] = None,
 ):
@@ -33,23 +34,22 @@ async def train_model(
             model_config = json.load(model_config_file)
 
     word_casing = WordCasing(model_config.get("lexicon", {}).get("casing", "lower"))
-    sentence_yaml: Dict[str, Any] = {}
 
     lexicon = LexiconDatabase(os.path.join(model_dir, "lexicon.db"))
 
     # User lexicon
-    words = sentence_yaml.get("words", {})
-    for word, word_prons in words.items():
-        if isinstance(word_prons, str):
-            word_prons = [word_prons]
+    if words:
+        for word, word_prons in words.items():
+            if isinstance(word_prons, str):
+                word_prons = [word_prons]
 
-        for word_pron in word_prons:
-            lexicon.add(word, get_sounds_like(word_pron.split(), lexicon))
+            for word_pron in word_prons:
+                lexicon.add(word, get_sounds_like(word_pron.split(), lexicon))
 
     with io.StringIO() as fst_file:
         fst_context = intents_to_fst(
             train_dir=train_dir,
-            sentence_yaml=sentence_yaml,
+            intents=intents,
             fst_file=fst_file,
             lexicon=lexicon,
             number_language=language,
