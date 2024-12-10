@@ -1,7 +1,9 @@
 import io
 from hassil.intents import Intents
 
-from rhasspy_speech.hassil_fst import intents_to_fst, SPACE
+from rhasspy_speech.hassil_fst import intents_to_fst, SPACE, G2PInfo
+from rhasspy_speech.const import WordCasing
+from rhasspy_speech.g2p import LexiconDatabase
 
 INTENTS_YAML = """
 language: en
@@ -31,6 +33,11 @@ intents:
       - sentences:
           - "set brightness to {brightness} percent"
 
+  ShoppingList:
+    data:
+      - sentences:
+          - "add {food} to shopping list"
+
 lists:
   name:
     values:
@@ -42,6 +49,11 @@ lists:
     range:
       from: 20
       to: 22
+  food:
+    values:
+      - A1 Steak Sauce
+      - NASA Moon Cakes
+      - 0 A.D. DVD
 """
 
 
@@ -114,3 +126,23 @@ def test_prune() -> None:
     # Branch is pruned
     fst.prune()
     assert not fst.to_tokens(only_connected=False)
+
+
+def test_g2p() -> None:
+    with io.StringIO(INTENTS_YAML) as intents_file:
+        intents = Intents.from_yaml(intents_file)
+
+    lexicon = LexiconDatabase()
+    lexicon.add("NASA", [["nah", "suh"]])
+
+    fst = intents_to_fst(
+        intents,
+        include_intents={"ShoppingList"},
+        number_language="en",
+        g2p_info=G2PInfo(lexicon, WordCasing.get_function(WordCasing.LOWER)),
+    ).remove_spaces()
+    assert set(fst.to_strings(True)) == {
+        "add a one steak sauce to shopping list",
+        "add nasa moon cakes to shopping list",
+        "add zero a d d v d to shopping list",
+    }

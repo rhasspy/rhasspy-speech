@@ -14,7 +14,7 @@ async def get_fuzzy_text(
     lang_dir: Path,
     tools: KaldiTools,
 ) -> Optional[Tuple[str, float]]:
-    fuzzy_fst_path = lang_dir / "G.arpa_fuzzy.fst"
+    fuzzy_fst_path = lang_dir / "G.fuzzy.fst"
     if not fuzzy_fst_path.exists():
         return None
 

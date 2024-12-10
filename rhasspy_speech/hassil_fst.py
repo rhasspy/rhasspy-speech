@@ -557,7 +557,6 @@ def expression_to_fst(
 
             if number_sequence is None:
                 values: List[ExpressionWithOutput] = []
-
                 if num_to_words is not None:
                     for number in range(
                         range_list.start, range_list.stop + 1, range_list.step

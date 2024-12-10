@@ -5,7 +5,7 @@ import json
 import os
 from collections.abc import Collection
 from pathlib import Path
-from typing import Any, Dict, Optional, Union, List
+from typing import Any, Dict, List, Optional, Union
 
 from hassil.intents import Intents
 

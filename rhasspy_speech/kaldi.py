@@ -127,9 +127,11 @@ class KaldiTrainer:
         # 2. Generate G.fst from skill graph
         if LangSuffix.GRAMMAR in lang_suffixes:
             await self._create_grammar(LangSuffix.GRAMMAR)
+            await self._create_fuzzy_fst(LangSuffix.GRAMMAR)
 
         if LangSuffix.ARPA in lang_suffixes:
-            await self._create_arpa(LangSuffix.ARPA, create_fuzzy_fst=True)
+            await self._create_arpa(LangSuffix.ARPA)
+            await self._create_fuzzy_fst(LangSuffix.ARPA)
 
         if LangSuffix.ARPA_RESCORE in lang_suffixes:
             await self._create_arpa(LangSuffix.ARPA_RESCORE, order=rescore_order)
@@ -247,11 +249,7 @@ class KaldiTrainer:
         )
 
     async def _create_arpa(
-        self,
-        lang_type: LangSuffix,
-        order: int = 3,
-        method: str = "witten_bell",
-        create_fuzzy_fst: bool = False,
+        self, lang_type: LangSuffix, order: int = 3, method: str = "witten_bell"
     ) -> None:
         lang_dir = self.lang_dir(lang_type.value)
         fst_path = lang_dir / "G.arpa.fst"
@@ -310,68 +308,6 @@ class KaldiTrainer:
             ],
         )
 
-        if create_fuzzy_fst:
-            # Create a version of G.arpa.fst with self loops that allow skipping
-            # words.
-            fuzzy_fst_path = lang_dir / "G.arpa_fuzzy.fst"
-            text_fuzzy_fst_path = fuzzy_fst_path.with_suffix(".fst.txt")
-            _LOGGER.debug("Creating fuzzy FST at %s", fuzzy_fst_path)
-
-            states: Set[str] = set()
-
-            # Copy transitions and add self loops
-            with open(text_fst_path, "r", encoding="utf-8") as text_fst_file, open(
-                text_fuzzy_fst_path, "w", encoding="utf-8"
-            ) as text_fuzzy_fst_file:
-                for line in text_fst_file:
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    # Copy transition
-                    print(line, file=text_fuzzy_fst_file)
-
-                    state = line.split(maxsplit=1)[0]
-                    if state in states:
-                        continue
-
-                    states.add(state)
-
-                # Create self loops
-                for state in states:
-                    # No penalty for <eps>
-                    print(
-                        state, state, self.eps, self.eps, 0.0, file=text_fuzzy_fst_file
-                    )
-
-                    for word in self.fst_context.vocab:
-                        if word[0] in ("<", "_"):
-                            # Skip meta words
-                            continue
-
-                        # Penalty for word removal
-                        print(
-                            state, state, word, self.eps, 1.0, file=text_fuzzy_fst_file
-                        )
-
-            await self.tools.async_run_pipeline(
-                [
-                    "fstcompile",
-                    shlex.quote(f"--isymbols={lang_dir}/words.txt"),
-                    shlex.quote(f"--osymbols={lang_dir}/words.txt"),
-                    "--keep_isymbols=true",
-                    "--keep_osymbols=true",
-                    shlex.quote(str(text_fuzzy_fst_path)),
-                    "-",
-                ],
-                [
-                    "fstarcsort",
-                    "--sort_type=ilabel",
-                    "-",
-                    shlex.quote(str(fuzzy_fst_path)),
-                ],
-            )
-
     async def _create_grammar(self, lang_type: LangSuffix) -> None:
         fst_file = self.fst_context.fst_file
         lang_dir = self.lang_dir(lang_type.value)
@@ -401,6 +337,70 @@ class KaldiTrainer:
                 "--sort_type=ilabel",
                 "-",
                 shlex.quote(str(fst_path)),
+            ],
+        )
+
+    async def _create_fuzzy_fst(self, lang_type: LangSuffix) -> None:
+        lang_dir = self.lang_dir(lang_type.value)
+        fst_path = lang_dir / f"G.{lang_type.value}.fst"
+        if not fst_path.exists():
+            fst_path = lang_dir / "G.fst"
+
+        text_fst_path = fst_path.with_suffix(".fst.txt")
+
+        # Create a version of the FST with self loops that allow skipping words
+        fuzzy_fst_path = lang_dir / "G.fuzzy.fst"
+        text_fuzzy_fst_path = fuzzy_fst_path.with_suffix(".fst.txt")
+        _LOGGER.debug("Creating fuzzy FST at %s", fuzzy_fst_path)
+
+        states: Set[str] = set()
+
+        # Copy transitions and add self loops
+        with open(text_fst_path, "r", encoding="utf-8") as text_fst_file, open(
+            text_fuzzy_fst_path, "w", encoding="utf-8"
+        ) as text_fuzzy_fst_file:
+            for line in text_fst_file:
+                line = line.strip()
+                if not line:
+                    continue
+
+                # Copy transition
+                print(line, file=text_fuzzy_fst_file)
+
+                state = line.split(maxsplit=1)[0]
+                if state in states:
+                    continue
+
+                states.add(state)
+
+            # Create self loops
+            for state in states:
+                # No penalty for <eps>
+                print(state, state, self.eps, self.eps, 0.0, file=text_fuzzy_fst_file)
+
+                for word in self.fst_context.vocab:
+                    if word[0] in ("<", "_"):
+                        # Skip meta words
+                        continue
+
+                    # Penalty for word removal
+                    print(state, state, word, self.eps, 1.0, file=text_fuzzy_fst_file)
+
+        await self.tools.async_run_pipeline(
+            [
+                "fstcompile",
+                shlex.quote(f"--isymbols={lang_dir}/words.txt"),
+                shlex.quote(f"--osymbols={lang_dir}/words.txt"),
+                "--keep_isymbols=true",
+                "--keep_osymbols=true",
+                shlex.quote(str(text_fuzzy_fst_path)),
+                "-",
+            ],
+            [
+                "fstarcsort",
+                "--sort_type=ilabel",
+                "-",
+                shlex.quote(str(fuzzy_fst_path)),
             ],
         )
 
