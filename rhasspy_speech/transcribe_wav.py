@@ -75,6 +75,17 @@ class KaldiNnet3WavTranscriber:
             ],
         )
 
+        int2sym_stdout = await self.tools.async_run_pipeline(
+            [
+                str(self.tools.egs_utils_dir / "int2sym.pl"),
+                "-f",
+                "2-",
+                str(new_lang_dir / "words.txt"),
+            ],
+            input=nbest_stdout,
+        )
+        _LOGGER.debug("nbest: %s", int2sym_stdout.decode(encoding="utf-8"))
+
         fuzzy_result = await get_fuzzy_text(nbest_stdout, lang_dir, self.tools)
         if fuzzy_result is not None:
             text, cost = fuzzy_result
@@ -82,18 +93,8 @@ class KaldiNnet3WavTranscriber:
             if cost <= max_fuzzy_cost:
                 return [decode_meta(text)]
 
-        stdout = await self.tools.async_run_pipeline(
-            [
-                str(self.tools.egs_utils_dir / "int2sym.pl"),
-                "-f",
-                "2-",
-                str(words_txt),
-            ],
-            input=nbest_stdout,
-        )
-
         texts: List[str] = []
-        for line in stdout.decode().splitlines():
+        for line in int2sym_stdout.decode().splitlines():
             if line.startswith("utt-"):
                 parts = line.strip().split(maxsplit=1)
                 if len(parts) > 1:
@@ -197,14 +198,7 @@ class KaldiNnet3WavTranscriber:
             ],
         )
 
-        fuzzy_result = await get_fuzzy_text(nbest_stdout, old_lang_dir, self.tools)
-        if fuzzy_result is not None:
-            text, cost = fuzzy_result
-            _LOGGER.debug("Fuzzy cost: %s", cost)
-            if cost <= max_fuzzy_cost:
-                return [decode_meta(text)]
-
-        stdout = await self.tools.async_run_pipeline(
+        int2sym_stdout = await self.tools.async_run_pipeline(
             [
                 str(self.tools.egs_utils_dir / "int2sym.pl"),
                 "-f",
@@ -213,9 +207,17 @@ class KaldiNnet3WavTranscriber:
             ],
             input=nbest_stdout,
         )
+        _LOGGER.debug("nbest: %s", int2sym_stdout.decode(encoding="utf-8"))
+
+        fuzzy_result = await get_fuzzy_text(nbest_stdout, old_lang_dir, self.tools)
+        if fuzzy_result is not None:
+            text, cost = fuzzy_result
+            _LOGGER.debug("Fuzzy cost: %s", cost)
+            if cost <= max_fuzzy_cost:
+                return [decode_meta(text)]
 
         texts: List[str] = []
-        for line in stdout.decode().splitlines():
+        for line in int2sym_stdout.decode().splitlines():
             if line.startswith("utt-"):
                 parts = line.strip().split(maxsplit=1)
                 if len(parts) > 1:

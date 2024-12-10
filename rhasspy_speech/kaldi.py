@@ -127,7 +127,7 @@ class KaldiTrainer:
         # 2. Generate G.fst from skill graph
         if LangSuffix.GRAMMAR in lang_suffixes:
             await self._create_grammar(LangSuffix.GRAMMAR)
-            await self._create_fuzzy_fst(LangSuffix.GRAMMAR)
+            await self._create_fuzzy_fst(LangSuffix.GRAMMAR, self_loops=False)
 
         if LangSuffix.ARPA in lang_suffixes:
             await self._create_arpa(LangSuffix.ARPA)
@@ -340,7 +340,9 @@ class KaldiTrainer:
             ],
         )
 
-    async def _create_fuzzy_fst(self, lang_type: LangSuffix) -> None:
+    async def _create_fuzzy_fst(
+        self, lang_type: LangSuffix, self_loops: bool = True
+    ) -> None:
         lang_dir = self.lang_dir(lang_type.value)
         fst_path = lang_dir / f"G.{lang_type.value}.fst"
         if not fst_path.exists():
@@ -376,7 +378,9 @@ class KaldiTrainer:
             # Create self loops
             for state in states:
                 # No penalty for <eps>
-                print(state, state, self.eps, self.eps, 0.0, file=text_fuzzy_fst_file)
+                print(
+                    state, state, self.eps, self.eps, 0.0, file=text_fuzzy_fst_file
+                )
 
                 for word in self.fst_context.vocab:
                     if word[0] in ("<", "_"):
@@ -384,7 +388,9 @@ class KaldiTrainer:
                         continue
 
                     # Penalty for word removal
-                    print(state, state, word, self.eps, 1.0, file=text_fuzzy_fst_file)
+                    print(
+                        state, state, word, self.eps, 1.0, file=text_fuzzy_fst_file
+                    )
 
         await self.tools.async_run_pipeline(
             [
