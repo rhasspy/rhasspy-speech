@@ -27,7 +27,7 @@ class IntentsToFstContext:
 
 def intents_to_fst(
     train_dir: Union[str, Path],
-    sentence_yaml: Dict[str, Any],
+    intents: Intents,
     fst_file: TextIO,
     lexicon: LexiconDatabase,
     number_language: Optional[str] = None,
@@ -39,7 +39,6 @@ def intents_to_fst(
     context = IntentsToFstContext(fst_file=fst_file, lexicon=lexicon)
     casing_func = WordCasing.get_function(word_casing)
 
-    intents = Intents.from_dict(sentence_yaml)
     fst = hassil_intents_to_fst(
         intents, number_language=number_language, g2p_info=G2PInfo(lexicon, casing_func)
     ).remove_spaces()

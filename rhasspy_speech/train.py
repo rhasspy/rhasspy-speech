@@ -7,8 +7,7 @@ from collections.abc import Collection, Iterable
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
-from hassil.util import merge_dict
-from yaml import safe_load
+from hassil.intents import Intents
 
 from .const import LangSuffix, WordCasing
 from .g2p import LexiconDatabase, get_sounds_like
@@ -19,7 +18,7 @@ from .tools import KaldiTools
 
 async def train_model(
     language: str,
-    sentence_files: Iterable[Union[str, Path]],
+    intents: Intents,
     train_dir: Union[str, Path],
     model_dir: Union[str, Path],
     tools: KaldiTools,
@@ -35,10 +34,6 @@ async def train_model(
 
     word_casing = WordCasing(model_config.get("lexicon", {}).get("casing", "lower"))
     sentence_yaml: Dict[str, Any] = {}
-
-    for sentence_path in sentence_files:
-        with open(sentence_path, "r", encoding="utf-8") as sentence_file:
-            merge_dict(sentence_yaml, safe_load(sentence_file))
 
     lexicon = LexiconDatabase(os.path.join(model_dir, "lexicon.db"))
 
