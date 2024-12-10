@@ -237,6 +237,17 @@ class KaldiNnet3StreamTranscriber:
                 ],
             )
 
+            stdout = await self.tools.async_run_pipeline(
+                [
+                    str(self.tools.egs_utils_dir / "int2sym.pl"),
+                    "-f",
+                    "2-",
+                    str(words_txt),
+                ],
+                input=nbest_stdout,
+            )
+            _LOGGER.debug(stdout.decode())
+
             fuzzy_result = await get_fuzzy_text(nbest_stdout, old_lang_dir, self.tools)
             if fuzzy_result is not None:
                 text, cost = fuzzy_result

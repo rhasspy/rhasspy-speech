@@ -170,21 +170,24 @@ class Fst:
         if arc.in_label == SPACE:
             key = (state, arc.to_state, arc_idx)
             cached_state = visited.get(key)
+            input_symbol = word or EPS
+            output_symbol = output_word or word or EPS
+
             if cached_state is not None:
                 fst_without_spaces.add_edge(
                     output_state,
                     cached_state,
-                    word or EPS,
-                    output_word or word or EPS,
-                    log_prob=WORD_PENALTY,
+                    input_symbol,
+                    output_symbol,
+                    log_prob=WORD_PENALTY if input_symbol != EPS else None,
                 )
                 return
 
             output_state = fst_without_spaces.next_edge(
                 output_state,
-                word or EPS,
-                output_word or word or EPS,
-                log_prob=WORD_PENALTY,
+                input_symbol,
+                output_symbol,
+                log_prob=WORD_PENALTY if input_symbol != EPS else None,
             )
             visited[key] = output_state
 
