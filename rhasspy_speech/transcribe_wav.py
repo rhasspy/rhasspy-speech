@@ -211,7 +211,7 @@ class KaldiNnet3WavTranscriber:
                 "2-",
                 str(new_lang_dir / "words.txt"),
             ],
-            stderr=asyncio.subprocess.STDOUT,
+            input=nbest_stdout,
         )
 
         texts: List[str] = []

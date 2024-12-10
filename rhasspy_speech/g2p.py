@@ -115,8 +115,8 @@ class LexiconDatabase:
 
 def split_words(
     text: str, lexicon: LexiconDatabase, number_engine: Optional[RbnfEngine] = None
-) -> List[str]:
-    words: List[str] = []
+) -> List[Union[str, Tuple[str, Optional[str]]]]:
+    words: List[Union[str, Tuple[str, Optional[str]]]] = []
     for word in text.split():
         if lexicon.exists(word):
             words.append(word)
@@ -141,7 +141,11 @@ def split_words(
                 # 123 -> one hundred twenty three
                 number_word_str = number_engine.format_number(sub_word).text
                 number_words = number_word_str.replace("-", " ").split()
-                words.extend(number_words)
+                for num_word_idx, number_word in enumerate(number_words):
+                    if num_word_idx == 0:
+                        words.append((number_word, sub_word))
+                    else:
+                        words.append((number_word, None))
             else:
                 # Will guess later
                 words.append(sub_word)

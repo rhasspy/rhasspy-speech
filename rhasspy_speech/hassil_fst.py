@@ -3,6 +3,7 @@ import math
 import re
 from collections import defaultdict
 from collections.abc import Callable
+from collections.abc import Sequence as ABCSequence
 from dataclasses import dataclass, field
 from functools import reduce
 from typing import Dict, List, Optional, Set, TextIO, Tuple, Union
@@ -207,6 +208,8 @@ class Fst:
             output_word = arc.out_label
         elif arc.in_label != EPS:
             word += arc.in_label
+            if (arc.out_label != arc.in_label) and (arc.out_label != EPS):
+                output_word = arc.out_label
 
         for next_arc_idx, next_arc in enumerate(self.arcs[arc.to_state]):
             self._remove_spaces(
@@ -391,6 +394,7 @@ def expression_to_fst(
         if space_before:
             state = fst.next_edge(state, SPACE)
 
+        sub_words: Sequence[Union[str, Tuple[str, Optional[str]]]]
         if g2p_info is not None:
             sub_words = split_words(
                 word,
@@ -402,10 +406,18 @@ def expression_to_fst(
 
         last_sub_word_idx = len(sub_words) - 1
         for sub_word_idx, sub_word in enumerate(sub_words):
+            if isinstance(sub_word, str):
+                sub_output_word = sub_word
+            else:
+                sub_word, sub_output_word = sub_word
+                sub_output_word = sub_output_word or EPS
+
             if g2p_info is not None:
                 sub_word = g2p_info.casing_func(sub_word)
 
-            state = fst.next_edge(state, sub_word, EPS if suppress_output else sub_word)
+            state = fst.next_edge(
+                state, sub_word, EPS if suppress_output else sub_output_word
+            )
             if sub_word_idx != last_sub_word_idx:
                 # Add spaces between words
                 state = fst.next_edge(state, SPACE)
