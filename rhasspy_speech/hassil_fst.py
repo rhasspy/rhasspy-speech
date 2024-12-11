@@ -4,6 +4,7 @@ import re
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from functools import reduce
 from typing import Dict, List, Optional, Set, TextIO, Tuple, Union
 
@@ -28,6 +29,12 @@ BEGIN_OUTPUT = "__begin_output"
 END_OUTPUT = "__end_output"
 OUTPUT_PREFIX = "__output:"
 WORD_PENALTY = 0.03
+
+
+class SuppressOutput(Enum):
+    DISABLED = auto()
+    UNTIL_END = auto()
+    UNTIL_SPACE = auto()
 
 
 @dataclass
@@ -167,17 +174,20 @@ class Fst:
         visited: Dict[Tuple[int, int, int], int],
         fst_without_spaces: "Fst",
         output_state: int,
-        suppress_output: bool = False,
+        suppress_output: SuppressOutput = SuppressOutput.DISABLED,
     ) -> None:
         if arc.in_label == SPACE:
             key = (state, arc.to_state, arc_idx)
             cached_state = visited.get(key)
             input_symbol = word or EPS
+            output_symbol = input_symbol
 
-            if suppress_output:
+            if suppress_output in (
+                SuppressOutput.UNTIL_END,
+                SuppressOutput.UNTIL_SPACE,
+            ):
                 output_symbol = output_word or EPS
-            else:
-                output_symbol = output_word or word or EPS
+                output_word = None  # consume
 
             if cached_state is not None:
                 fst_without_spaces.add_edge(
@@ -202,22 +212,29 @@ class Fst:
 
             word = ""
 
-            if output_word != EPS:
-                output_word = None
-        elif arc.out_label.startswith(BEGIN_OUTPUT):
+            if suppress_output == SuppressOutput.UNTIL_SPACE:
+                suppress_output = SuppressOutput.DISABLED
+        elif arc.in_label != EPS:
+            word += arc.in_label
+
+            if (
+                (suppress_output == SuppressOutput.DISABLED)
+                and (arc.out_label != EPS)
+                and (arc.out_label != arc.in_label)
+            ):
+                # Short-term output override
+                suppress_output = SuppressOutput.UNTIL_SPACE
+                output_word = arc.out_label
+
+        if arc.out_label.startswith(BEGIN_OUTPUT):
             # Start suppressing output
-            suppress_output = True
-            output_word = None
+            suppress_output = SuppressOutput.UNTIL_END
         elif arc.out_label.startswith(OUTPUT_PREFIX):
             # Output on next space
             output_word = arc.out_label
         elif arc.out_label.startswith(END_OUTPUT):
             # Stop suppressing output
-            suppress_output = False
-        elif arc.in_label != EPS:
-            word += arc.in_label
-            if (arc.out_label != arc.in_label) and (arc.out_label != EPS):
-                output_word = arc.out_label
+            suppress_output = SuppressOutput.UNTIL_SPACE
 
         for next_arc_idx, next_arc in enumerate(self.arcs[arc.to_state]):
             self._remove_spaces(
@@ -339,13 +356,13 @@ class G2PInfo:
 
 
 @dataclass
-class ExpressionWithOutput:
-    expression: Expression
+class ExpressionsWithOutput:
+    expressions: List[Expression]
     output_text: str
 
 
 def expression_to_fst(
-    expression: Union[Expression, ExpressionWithOutput],
+    expression: Union[Expression, ExpressionsWithOutput],
     state: int,
     fst: Fst,
     intent_data: IntentData,
@@ -355,26 +372,26 @@ def expression_to_fst(
     g2p_info: Optional[G2PInfo] = None,
     suppress_output: bool = False,
 ) -> Optional[int]:
-    if isinstance(expression, ExpressionWithOutput):
-        exp_output: ExpressionWithOutput = expression
-
-        output_word = encode_meta(exp_output.output_text)
+    if isinstance(expression, ExpressionsWithOutput):
+        exps_output: ExpressionsWithOutput = expression
+        output_word = encode_meta(exps_output.output_text)
         state = fst.next_edge(state, EPS, BEGIN_OUTPUT)
         state = fst.next_edge(state, EPS, output_word)
-        state = expression_to_fst(
-            exp_output.expression,
-            state,
-            fst,
-            intent_data,
-            intents,
-            slot_lists,
-            num_to_words,
-            g2p_info,
-            suppress_output=suppress_output,
-        )
-        if state is None:
-            # Dead branch
-            return None
+        for output_expression in exps_output.expressions:
+            state = expression_to_fst(
+                output_expression,
+                state,
+                fst,
+                intent_data,
+                intents,
+                slot_lists,
+                num_to_words,
+                g2p_info,
+                suppress_output=suppress_output,
+            )
+            if state is None:
+                # Dead branch
+                return None
 
         return fst.next_edge(state, EPS, END_OUTPUT)
 
@@ -501,7 +518,7 @@ def expression_to_fst(
         if isinstance(slot_list, TextSlotList):
             text_list: TextSlotList = slot_list
 
-            values: List[Expression] = []
+            values: List[ExpressionsWithOutput] = []
             for value in text_list.values:
                 if (intent_data.requires_context is not None) and (
                     not check_required_context(
@@ -529,8 +546,8 @@ def expression_to_fst(
 
                 if value_output_text:
                     values.append(
-                        ExpressionWithOutput(
-                            value.text_in, output_text=value_output_text
+                        ExpressionsWithOutput(
+                            [value.text_in], output_text=value_output_text
                         )
                     )
                 else:
@@ -562,7 +579,7 @@ def expression_to_fst(
             number_sequence = num_to_words.cache.get(num_cache_key)
 
             if number_sequence is None:
-                values: List[ExpressionWithOutput] = []
+                values: List[ExpressionsWithOutput] = []
                 if num_to_words is not None:
                     for number in range(
                         range_list.start, range_list.stop + 1, range_list.step
@@ -573,12 +590,10 @@ def expression_to_fst(
                             w.replace("-", " ")
                             for w in number_result.text_by_ruleset.values()
                         }
-                        values.extend(
-                            (
-                                ExpressionWithOutput(
-                                    TextChunk(w), output_text=number_str
-                                )
-                                for w in number_words
+                        values.append(
+                            ExpressionsWithOutput(
+                                [TextChunk(w) for w in number_words],
+                                output_text=number_str,
                             )
                         )
 
