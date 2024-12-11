@@ -26,7 +26,7 @@ EPS = "<eps>"
 SPACE = "<space>"
 BEGIN_OUTPUT = "__begin_output"
 OUTPUT_PREFIX = "__output:"
-WORD_PENALTY = 0.08
+WORD_PENALTY = 0.03
 
 
 @dataclass
