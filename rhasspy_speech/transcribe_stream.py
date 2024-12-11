@@ -41,6 +41,7 @@ class KaldiNnet3StreamTranscriber:
         lang_dir: Union[str, Path],
         nbest: int = 1,
         max_fuzzy_cost: Optional[float] = None,
+        require_fuzzy: bool = False,
     ) -> List[str]:
         lang_dir = Path(lang_dir)
         model_file = self.model_dir / "model" / "model" / "final.mdl"
@@ -115,6 +116,9 @@ class KaldiNnet3StreamTranscriber:
                 if cost <= max_fuzzy_cost:
                     return [decode_meta(text)]
 
+            if require_fuzzy:
+                return []
+
             texts: List[str] = []
             for line in int2sym_stdout.decode().splitlines():
                 if line.startswith("utt-"):
@@ -131,6 +135,7 @@ class KaldiNnet3StreamTranscriber:
         new_lang_dir: Union[str, Path],
         nbest: int = 1,
         max_fuzzy_cost: Optional[float] = None,
+        require_fuzzy: bool = False,
     ) -> List[str]:
         old_lang_dir = Path(old_lang_dir)
         new_lang_dir = Path(new_lang_dir)
@@ -254,6 +259,9 @@ class KaldiNnet3StreamTranscriber:
                 _LOGGER.debug("Fuzzy cost: %s", cost)
                 if cost <= max_fuzzy_cost:
                     return [decode_meta(text)]
+
+            if require_fuzzy:
+                return []
 
             # Gather nbest transcriptions
             texts: List[str] = []

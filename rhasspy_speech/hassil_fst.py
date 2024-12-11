@@ -25,6 +25,7 @@ from .g2p import LexiconDatabase, split_words
 EPS = "<eps>"
 SPACE = "<space>"
 BEGIN_OUTPUT = "__begin_output"
+END_OUTPUT = "__end_output"
 OUTPUT_PREFIX = "__output:"
 WORD_PENALTY = 0.03
 
@@ -166,12 +167,17 @@ class Fst:
         visited: Dict[Tuple[int, int, int], int],
         fst_without_spaces: "Fst",
         output_state: int,
+        suppress_output: bool = False,
     ) -> None:
         if arc.in_label == SPACE:
             key = (state, arc.to_state, arc_idx)
             cached_state = visited.get(key)
             input_symbol = word or EPS
-            output_symbol = output_word or word or EPS
+
+            if suppress_output:
+                output_symbol = output_word or EPS
+            else:
+                output_symbol = output_word or word or EPS
 
             if cached_state is not None:
                 fst_without_spaces.add_edge(
@@ -197,14 +203,17 @@ class Fst:
             word = ""
 
             if output_word != EPS:
-                # Clear output
                 output_word = None
         elif arc.out_label.startswith(BEGIN_OUTPUT):
             # Start suppressing output
-            output_word = EPS
+            suppress_output = True
+            output_word = None
         elif arc.out_label.startswith(OUTPUT_PREFIX):
             # Output on next space
             output_word = arc.out_label
+        elif arc.out_label.startswith(END_OUTPUT):
+            # Stop suppressing output
+            suppress_output = False
         elif arc.in_label != EPS:
             word += arc.in_label
             if (arc.out_label != arc.in_label) and (arc.out_label != EPS):
@@ -220,6 +229,7 @@ class Fst:
                 visited,
                 fst_without_spaces,
                 output_state,
+                suppress_output=suppress_output,
             )
 
     def prune(self) -> None:
@@ -348,12 +358,9 @@ def expression_to_fst(
     if isinstance(expression, ExpressionWithOutput):
         exp_output: ExpressionWithOutput = expression
 
-        output_word = OUTPUT_PREFIX + (
-            base64.b32encode(exp_output.output_text.encode("utf-8"))
-            .strip()
-            .decode("utf-8")
-        )
+        output_word = encode_meta(exp_output.output_text)
         state = fst.next_edge(state, EPS, BEGIN_OUTPUT)
+        state = fst.next_edge(state, EPS, output_word)
         state = expression_to_fst(
             exp_output.expression,
             state,
@@ -363,13 +370,13 @@ def expression_to_fst(
             slot_lists,
             num_to_words,
             g2p_info,
-            suppress_output=True,
+            suppress_output=suppress_output,
         )
         if state is None:
             # Dead branch
             return None
 
-        return fst.next_edge(state, EPS, output_word)
+        return fst.next_edge(state, EPS, END_OUTPUT)
 
     if isinstance(expression, TextChunk):
         chunk: TextChunk = expression
@@ -703,7 +710,7 @@ def intents_to_fst(
 
     filtered_intents = []
     # sentence_counts: Dict[str, int] = {}
-    sentence_counts: Dict[Sentence, int] = {}
+    # sentence_counts: Dict[Sentence, int] = {}
 
     for intent in intents.intents.values():
         if (exclude_intents is not None) and (intent.name in exclude_intents):
@@ -713,12 +720,11 @@ def intents_to_fst(
             continue
 
         # num_sentences = 0
-        for i, data in enumerate(intent.data):
-            for j, sentence in enumerate(data.sentences):
-                # num_sentences += get_count(sentence, intents, data)
-                sentence_counts[(intent.name, i, j)] = get_count(
-                    sentence, intents, data
-                )
+        # for i, data in enumerate(intent.data):
+        #     for j, sentence in enumerate(data.sentences):
+        #         sentence_counts[(intent.name, i, j)] = get_count(
+        #             sentence, intents, data
+        #         )
 
         filtered_intents.append(intent)
         # sentence_counts[intent.name] = num_sentences
@@ -750,6 +756,12 @@ def intents_to_fst(
         # )
 
         for i, data in enumerate(intent.data):
+            sentence_output: Optional[str] = None
+            if data.metadata is not None:
+                sentence_output = data.metadata.get("output")
+                if sentence_output:
+                    sentence_output = encode_meta(sentence_output)
+
             for j, sentence in enumerate(data.sentences):
                 # weight = sentence_weights[(intent.name, i, j)]
                 # sentence_prob = weight / weight_sum
@@ -759,6 +771,17 @@ def intents_to_fst(
                     SPACE,
                     # log_prob=-math.log(sentence_prob),
                 )
+
+                if sentence_output:
+                    # Sentence has different output than input
+                    # TODO: Replace list references
+                    sentence_state = fst_with_spaces.next_edge(
+                        sentence_state, EPS, BEGIN_OUTPUT
+                    )
+                    sentence_state = fst_with_spaces.next_edge(
+                        sentence_state, EPS, sentence_output
+                    )
+
                 state = expression_to_fst(
                     sentence,
                     # intent_state,
@@ -769,6 +792,7 @@ def intents_to_fst(
                     slot_lists,
                     num_to_words,
                     g2p_info,
+                    suppress_output=(sentence_output is not None),
                 )
 
                 if state is None:
@@ -776,6 +800,9 @@ def intents_to_fst(
                     continue
 
                 fst_with_spaces.add_edge(state, final, SPACE, SPACE)
+
+                if sentence_output:
+                    state = fst_with_spaces.next_edge(state, EPS, END_OUTPUT)
 
     fst_with_spaces.accept(final)
 
@@ -787,4 +814,10 @@ def decode_meta(text: str) -> str:
         re.escape(OUTPUT_PREFIX) + "([0-9A-Z=]+)",
         lambda m: base64.b32decode(m.group(1).encode("utf-8")).decode("utf-8"),
         text,
+    )
+
+
+def encode_meta(text: str) -> str:
+    return OUTPUT_PREFIX + (
+        base64.b32encode(text.encode("utf-8")).strip().decode("utf-8")
     )

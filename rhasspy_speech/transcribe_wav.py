@@ -38,6 +38,7 @@ class KaldiNnet3WavTranscriber:
         lang_dir: Union[str, Path],
         nbest: int = 1,
         max_fuzzy_cost: Optional[float] = None,
+        require_fuzzy: bool = False,
     ) -> List[str]:
         words_txt = self.graph_dir / "words.txt"
         online_conf = self.model_dir / "model" / "online" / "conf" / "online.conf"
@@ -91,6 +92,9 @@ class KaldiNnet3WavTranscriber:
             if cost <= max_fuzzy_cost:
                 return [decode_meta(text)]
 
+        if require_fuzzy:
+            return []
+
         texts: List[str] = []
         for line in int2sym_stdout.decode().splitlines():
             if line.startswith("utt-"):
@@ -107,6 +111,7 @@ class KaldiNnet3WavTranscriber:
         new_lang_dir: Union[str, Path],
         nbest: int = 1,
         max_fuzzy_cost: Optional[float] = None,
+        require_fuzzy: bool = False,
     ) -> List[str]:
         old_lang_dir = Path(old_lang_dir)
         new_lang_dir = Path(new_lang_dir)
@@ -213,6 +218,9 @@ class KaldiNnet3WavTranscriber:
             _LOGGER.debug("Fuzzy cost: %s", cost)
             if cost <= max_fuzzy_cost:
                 return [decode_meta(text)]
+
+        if require_fuzzy:
+            return []
 
         texts: List[str] = []
         for line in int2sym_stdout.decode().splitlines():
