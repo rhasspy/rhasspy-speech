@@ -52,7 +52,7 @@ lists:
   food:
     values:
       - A1 Steak Sauce
-      - NASA Moon Cakes
+      - NASA Moon Cake[s]
       - 0 A.D. DVD
 """
 
@@ -143,6 +143,7 @@ def test_g2p() -> None:
     ).remove_spaces()
     assert set(fst.to_strings(True)) == {
         "add a one steak sauce to shopping list",
+        "add nasa moon cake to shopping list",
         "add nasa moon cakes to shopping list",
         "add zero a d d v d to shopping list",
     }
