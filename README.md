@@ -1,5 +1,7 @@
 # Rhasspy Speech
 
+![logo](logo.png)
+
 Port of the speech-to-text system from [Rhasspy](https://rhasspy.readthedocs.io/en/latest/). This uses [Kaldi](https://kaldi-asr.org/) under the hood to recognize sentences from a set of pre-defined templates.
 
 For example, the template:
