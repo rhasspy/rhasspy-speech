@@ -365,14 +365,14 @@ class G2PInfo:
 
 
 @dataclass
-class ExpressionsWithOutput:
-    expressions: List[Expression]
+class ExpressionWithOutput:
+    expression: Expression
     output_text: str
     list_name: Optional[str] = None
 
 
 def expression_to_fst(
-    expression: Union[Expression, ExpressionsWithOutput],
+    expression: Union[Expression, ExpressionWithOutput],
     state: int,
     fst: Fst,
     intent_data: IntentData,
@@ -382,31 +382,30 @@ def expression_to_fst(
     g2p_info: Optional[G2PInfo] = None,
     suppress_output: bool = False,
 ) -> Optional[int]:
-    if isinstance(expression, ExpressionsWithOutput):
-        exps_output: ExpressionsWithOutput = expression
-        output_data = {"text": exps_output.output_text}
-        if exps_output.list_name:
-            output_data["list"] = exps_output.list_name
+    if isinstance(expression, ExpressionWithOutput):
+        exp_output: ExpressionWithOutput = expression
+        output_data = {"text": exp_output.output_text}
+        if exp_output.list_name:
+            output_data["list"] = exp_output.list_name
 
         output_word = encode_meta(json.dumps(output_data))
 
         state = fst.next_edge(state, EPS, BEGIN_OUTPUT)
         state = fst.next_edge(state, EPS, output_word)
-        for output_expression in exps_output.expressions:
-            state = expression_to_fst(
-                output_expression,
-                state,
-                fst,
-                intent_data,
-                intents,
-                slot_lists,
-                num_to_words,
-                g2p_info,
-                suppress_output=suppress_output,
-            )
-            if state is None:
-                # Dead branch
-                return None
+        state = expression_to_fst(
+            exp_output.expression,
+            state,
+            fst,
+            intent_data,
+            intents,
+            slot_lists,
+            num_to_words,
+            g2p_info,
+            suppress_output=suppress_output,
+        )
+        if state is None:
+            # Dead branch
+            return None
 
         return fst.next_edge(state, EPS, END_OUTPUT)
 
@@ -533,7 +532,7 @@ def expression_to_fst(
         if isinstance(slot_list, TextSlotList):
             text_list: TextSlotList = slot_list
 
-            values: List[ExpressionsWithOutput] = []
+            values: List[ExpressionWithOutput] = []
             for value in text_list.values:
                 if (intent_data.requires_context is not None) and (
                     not check_required_context(
@@ -561,8 +560,8 @@ def expression_to_fst(
 
                 if value_output_text:
                     values.append(
-                        ExpressionsWithOutput(
-                            [value.text_in],
+                        ExpressionWithOutput(
+                            value.text_in,
                             output_text=value_output_text,
                             list_name=list_ref.slot_name,
                         )
@@ -596,7 +595,7 @@ def expression_to_fst(
             number_sequence = num_to_words.cache.get(num_cache_key)
 
             if number_sequence is None:
-                values: List[ExpressionsWithOutput] = []
+                values: List[ExpressionWithOutput] = []
                 if num_to_words is not None:
                     for number in range(
                         range_list.start, range_list.stop + 1, range_list.step
@@ -607,12 +606,13 @@ def expression_to_fst(
                             w.replace("-", " ")
                             for w in number_result.text_by_ruleset.values()
                         }
-                        values.append(
-                            ExpressionsWithOutput(
-                                [TextChunk(w) for w in number_words],
+                        values.extend(
+                            ExpressionWithOutput(
+                                TextChunk(w),
                                 output_text=number_str,
                                 list_name=list_ref.slot_name,
                             )
+                            for w in number_words
                         )
 
                 number_sequence = Sequence(values, type=SequenceType.ALTERNATIVE)
