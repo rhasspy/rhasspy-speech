@@ -26,7 +26,6 @@ class IntentsToFstContext:
 
 
 def intents_to_fst(
-    train_dir: Union[str, Path],
     intents: Intents,
     fst_file: TextIO,
     lexicon: LexiconDatabase,
@@ -34,8 +33,6 @@ def intents_to_fst(
     word_casing: WordCasing = WordCasing.LOWER,
 ) -> IntentsToFstContext:
     """Convert YAML sentence files to an FST for Kaldi."""
-    os.makedirs(train_dir, exist_ok=True)
-
     context = IntentsToFstContext(fst_file=fst_file, lexicon=lexicon)
     casing_func = WordCasing.get_function(word_casing)
 

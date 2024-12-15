@@ -48,7 +48,6 @@ async def train_model(
 
     with io.StringIO() as fst_file:
         fst_context = intents_to_fst(
-            train_dir=train_dir,
             intents=intents,
             fst_file=fst_file,
             lexicon=lexicon,
