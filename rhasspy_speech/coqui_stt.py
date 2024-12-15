@@ -1,15 +1,22 @@
+"""Uses Coqui STT and OpenFST for decoding.
+
+See:
+- https://github.com/coqui-ai/STT
+- https://arxiv.org/pdf/2206.14589
+"""
+
 import asyncio
-import itertools
-import math
 import asyncio.subprocess
-import struct
-import shutil
-import shlex
+import itertools
 import logging
+import math
+import shlex
+import shutil
+import struct
 import tempfile
-from typing import Dict, Union, List, Optional, Set
-from pathlib import Path
 from asyncio.subprocess import Process
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Union
 
 from .hassil_fst import decode_meta
 from .intent_fst import IntentsToFstContext
@@ -143,8 +150,7 @@ class CoquiSttTranscriber:
         idx2char = {i: c for c, i in char2idx.items()}
 
         with tempfile.TemporaryDirectory() as temp_dir_str:
-            # temp_dir = Path(temp_dir_str)
-            temp_dir = train_dir
+            temp_dir = Path(temp_dir_str)
             logits_txt = temp_dir / "logits.fst.txt"
             with open(logits_txt, "w", encoding="utf-8") as logits_file:
                 current = 0
@@ -170,6 +176,7 @@ class CoquiSttTranscriber:
 
                 print(current, file=logits_file)
 
+            # tokens -> chars -> words -> sentences
             tokens_txt = train_dir / "tokens_with_blank.txt"
             token2sen_fst = train_dir / "token2sen.fst"
             stdout = await self.tools.async_run_pipeline(
@@ -184,7 +191,7 @@ class CoquiSttTranscriber:
                 ["fstminimize"],
                 ["fstpush", "--push_weights"],
                 ["fstarcsort", "--sort_type=olabel"],
-                # ["fstprune", f"--weight={prune_threshold}"],
+                ["fstprune", f"--weight={prune_threshold}"],  # prune logits
                 ["fstcompose", "-", shlex.quote(str(token2sen_fst))],
                 ["fstshortestpath"],
                 ["fstproject", "--project_type=output"],
@@ -195,7 +202,7 @@ class CoquiSttTranscriber:
                     shlex.quote(f"--isymbols={output_txt}"),
                     shlex.quote(f"--osymbols={output_txt}"),
                 ],
-                ["awk", "{print $4}"]
+                ["awk", "{print $4}"],  # output label
             )
 
         words = stdout.decode(encoding="utf-8").split()
@@ -217,7 +224,7 @@ class CoquiSttTrainer:
         alphabet_path = self.model_dir / "alphabet.txt"
 
         # Load alphabet
-        a_idx = 1
+        a_idx = 1  # <eps> = 0
         with open(alphabet_path, "r", encoding="utf-8") as a_file:
             for line in a_file:
                 line = line.strip()
@@ -255,7 +262,7 @@ class CoquiSttTrainer:
         ) as tokens_with_blank_file, open(
             tokens_without_blank, "w", encoding="utf-8"
         ) as tokens_without_blank_file:
-            # NOTE: epsilon *MUST* be id 0
+            # NOTE: <eps> *MUST* be id 0
             for tokens_file in (tokens_with_blank_file, tokens_without_blank_file):
                 print(EPSILON, 0, file=tokens_file)
                 for i, c in self.idx2char.items():

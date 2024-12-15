@@ -1,10 +1,8 @@
 """Convert sentences to FST."""
 
 import logging
-import os
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Optional, Set, TextIO, Union
+from typing import Optional, Set, TextIO
 
 from hassil.intents import Intents
 

@@ -2,8 +2,13 @@
 this_dir="$( cd "$( dirname "$0" )" && pwd )"
 program_dir="$(realpath "${this_dir}/..")"
 
+platforms='linux/amd64,linux/arm64'
+if [ -n "$1" ]; then
+    platforms="$1"
+fi
+
 pushd "${program_dir}"
 docker buildx build . \
-    --platform 'linux/amd64,linux/arm64,linux/arm/v7' \
+    --platform "${platforms}" \
     --output 'type=local,dest=dist'
 popd

@@ -2,5 +2,6 @@
 !kaldi/
 !openfst/
 !opengrm/
-!phonetisaurus
+!phonetisaurus/
+!coqui_stt/
 !script/
