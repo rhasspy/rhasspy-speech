@@ -399,8 +399,8 @@ class CoquiSttTrainer:
                 shlex.quote(f"--osymbols={words_txt}"),
                 shlex.quote(str(char2word_txt)),
             ],
-            ["fstdeterminize"],
-            ["fstminimize"],
+            # ["fstdeterminize"],
+            # ["fstminimize"],
             ["fstpush", "--push_weights"],
             ["fstarcsort", "--sort_type=ilabel", "-", shlex.quote(str(char2word_fst))],
         )
