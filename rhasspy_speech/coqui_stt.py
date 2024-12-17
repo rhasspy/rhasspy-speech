@@ -392,39 +392,36 @@ class CoquiSttTrainer:
         )
 
         char2word_fst = train_dir / "char2word.fst"
-        await self.tools.async_run_pipeline(
+        await self._try_minimize(
             [
                 "fstcompile",
                 shlex.quote(f"--isymbols={tokens_without_blank}"),
                 shlex.quote(f"--osymbols={words_txt}"),
                 shlex.quote(str(char2word_txt)),
             ],
-            # ["fstdeterminize"],
-            # ["fstminimize"],
-            ["fstpush", "--push_weights"],
-            ["fstarcsort", "--sort_type=ilabel", "-", shlex.quote(str(char2word_fst))],
+            char2word_fst,
         )
 
         word2sen_fst = train_dir / "word2sen.fst"
-        await self.tools.async_run_pipeline(
+        await self._try_minimize(
             [
                 "fstcompile",
                 shlex.quote(f"--isymbols={words_txt}"),
                 shlex.quote(f"--osymbols={output_txt}"),
                 shlex.quote(str(word2sen_txt)),
             ],
-            ["fstarcsort", "--sort_type=ilabel", "-", shlex.quote(str(word2sen_fst))],
+            word2sen_fst,
         )
 
         # token -> char -> word
         token2word_fst = train_dir / "token2word.fst"
-        await self.tools.async_run_pipeline(
+        await self._try_minimize(
             [
                 "fstcompose",
                 shlex.quote(str(token2char_fst)),
                 shlex.quote(str(char2word_fst)),
             ],
-            ["fstarcsort", "--sort_type=ilabel", "-", shlex.quote(str(token2word_fst))],
+            token2word_fst,
         )
 
         # token -> char -> word -> sentence
@@ -439,3 +436,36 @@ class CoquiSttTrainer:
             ["fstpush", "--push_weights"],
             ["fstarcsort", "--sort_type=ilabel", "-", shlex.quote(str(token2sen_fst))],
         )
+
+    async def _try_minimize(
+        self,
+        compile_command: List[str],
+        fst_path: Union[str, Path],
+        arc_sort_type: str = "ilabel",
+    ) -> None:
+        try:
+            # With minimize
+            await self.tools.async_run_pipeline(
+                compile_command,
+                ["fstdeterminize"],
+                ["fstminimize"],
+                ["fstpush", "--push_weights"],
+                [
+                    "fstarcsort",
+                    f"--sort_type={arc_sort_type}",
+                    "-",
+                    shlex.quote(str(fst_path)),
+                ],
+            )
+        except Exception:
+            # Without minimize
+            await self.tools.async_run_pipeline(
+                compile_command,
+                ["fstpush", "--push_weights"],
+                [
+                    "fstarcsort",
+                    f"--sort_type={arc_sort_type}",
+                    "-",
+                    shlex.quote(str(fst_path)),
+                ],
+            )
